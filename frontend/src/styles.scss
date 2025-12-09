@@ -1,0 +1,41 @@
+@import '@angular/material/theming';
+
+@include mat-core();
+
+$primary: mat-palette($mat-blue);
+$accent: mat-palette($mat-amber, A200, A100, A400);
+$warn: mat-palette($mat-red);
+
+$theme: mat-light-theme((
+  color: (
+    primary: $primary,
+    accent: $accent,
+    warn: $warn,
+  ),
+  typography: mat-typography-config(),
+  density: 0,
+));
+
+@include angular-material-theme($theme);
+
+html, body { height: 100%; }
+body { margin: 0; font-family: Roboto, "Helvetica Neue", sans-serif; }
+
+.full-width {
+  width: 100%;
+}
+
+.success {
+  color: #4caf50;
+  font-weight: 500;
+}
+
+.error {
+  color: #f44336;
+  font-weight: 500;
+}
+
+.count {
+  font-weight: bold;
+  color: #1976d2;
+}

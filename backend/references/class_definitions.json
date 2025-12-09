@@ -1,0 +1,227 @@
+{
+  "RDF_0001": {
+    "uri": "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+    "label_en": "type",
+    "display_label": "Type"
+  },
+  "RDF_0002": {
+    "uri": "http://www.w3.org/2000/01/rdf-schema#Class",
+    "label_en": "class",
+    "display_label": "Class"
+  },
+  "RDF_0003": {
+    "uri": "http://www.w3.org/2000/01/rdf-schema#Property",
+    "label_en": "property",
+    "display_label": "Property"
+  },
+  "RDF_0004": {
+    "uri": "http://www.w3.org/2000/01/rdf-schema#Resource",
+    "label_en": "resource",
+    "display_label": "Resource"
+  },
+  "RDF_0005": {
+    "uri": "http://www.w3.org/2000/01/rdf-schema#label",
+    "label_en": "label",
+    "display_label": "Label"
+  },
+  "RDF_0006": {
+    "uri": "http://www.w3.org/2000/01/rdf-schema#comment",
+    "label_en": "comment",
+    "display_label": "Comment"
+  },
+  "RDF_0007": {
+    "uri": "http://www.w3.org/2000/01/rdf-schema#subClassOf",
+    "label_en": "subclass of",
+    "display_label": "Subclass Of"
+  },
+  "RDF_0008": {
+    "uri": "http://www.w3.org/2000/01/rdf-schema#subPropertyOf",
+    "label_en": "subproperty of",
+    "display_label": "Subproperty Of"
+  },
+  "RDF_0009": {
+    "uri": "http://www.w3.org/2000/01/rdf-schema#domain",
+    "label_en": "domain",
+    "display_label": "Domain"
+  },
+  "RDF_0010": {
+    "uri": "http://www.w3.org/2000/01/rdf-schema#range",
+    "label_en": "range",
+    "display_label": "Range"
+  },
+  "OWL_0001": {
+    "uri": "http://www.w3.org/2002/07/owl#Thing",
+    "label_en": "thing",
+    "display_label": "Thing"
+  },
+  "OWL_0002": {
+    "uri": "http://www.w3.org/2002/07/owl#Class",
+    "label_en": "class",
+    "display_label": "OWL Class"
+  },
+  "OWL_0003": {
+    "uri": "http://www.w3.org/2002/07/owl#Individual",
+    "label_en": "individual",
+    "display_label": "Individual"
+  },
+  "OWL_0004": {
+    "uri": "http://www.w3.org/2002/07/owl#ObjectProperty",
+    "label_en": "object property",
+    "display_label": "Object Property"
+  },
+  "OWL_0005": {
+    "uri": "http://www.w3.org/2002/07/owl#DatatypeProperty",
+    "label_en": "datatype property",
+    "display_label": "Datatype Property"
+  },
+  "OWL_0006": {
+    "uri": "http://www.w3.org/2002/07/owl#FunctionalProperty",
+    "label_en": "functional property",
+    "display_label": "Functional Property"
+  },
+  "OWL_0007": {
+    "uri": "http://www.w3.org/2002/07/owl#InverseFunctionalProperty",
+    "label_en": "inverse functional property",
+    "display_label": "Inverse Functional Property"
+  },
+  "OWL_0008": {
+    "uri": "http://www.w3.org/2002/07/owl#TransitiveProperty",
+    "label_en": "transitive property",
+    "display_label": "Transitive Property"
+  },
+  "OWL_0009": {
+    "uri": "http://www.w3.org/2002/07/owl#SymmetricProperty",
+    "label_en": "symmetric property",
+    "display_label": "Symmetric Property"
+  },
+  "OWL_0010": {
+    "uri": "http://www.w3.org/2002/07/owl#sameAs",
+    "label_en": "same as",
+    "display_label": "Same As"
+  },
+  "OWL_0011": {
+    "uri": "http://www.w3.org/2002/07/owl#differentFrom",
+    "label_en": "different from",
+    "display_label": "Different From"
+  },
+  "FOAF_0001": {
+    "uri": "http://xmlns.com/foaf/0.1/Person",
+    "label_en": "person",
+    "display_label": "Person"
+  },
+  "FOAF_0002": {
+    "uri": "http://xmlns.com/foaf/0.1/Organization",
+    "label_en": "organization",
+    "display_label": "Organization"
+  },
+  "FOAF_0003": {
+    "uri": "http://xmlns.com/foaf/0.1/Document",
+    "label_en": "document",
+    "display_label": "Document"
+  },
+  "FOAF_0004": {
+    "uri": "http://xmlns.com/foaf/0.1/Agent",
+    "label_en": "agent",
+    "display_label": "Agent"
+  },
+  "FOAF_0005": {
+    "uri": "http://xmlns.com/foaf/0.1/name",
+    "label_en": "name",
+    "display_label": "Name"
+  },
+  "FOAF_0006": {
+    "uri": "http://xmlns.com/foaf/0.1/knows",
+    "label_en": "knows",
+    "display_label": "Knows"
+  },
+  "FOAF_0007": {
+    "uri": "http://xmlns.com/foaf/0.1/member",
+    "label_en": "member",
+    "display_label": "Member"
+  },
+  "DCTERMS_0001": {
+    "uri": "http://purl.org/dc/terms/title",
+    "label_en": "title",
+    "display_label": "Title"
+  },
+  "DCTERMS_0002": {
+    "uri": "http://purl.org/dc/terms/creator",
+    "label_en": "creator",
+    "display_label": "Creator"
+  },
+  "DCTERMS_0003": {
+    "uri": "http://purl.org/dc/terms/description",
+    "label_en": "description",
+    "display_label": "Description"
+  },
+  "DCTERMS_0004": {
+    "uri": "http://purl.org/dc/terms/subject",
+    "label_en": "subject",
+    "display_label": "Subject"
+  },
+  "DCTERMS_0005": {
+    "uri": "http://purl.org/dc/terms/date",
+    "label_en": "date",
+    "display_label": "Date"
+  },
+  "DCTERMS_0006": {
+    "uri": "http://purl.org/dc/terms/type",
+    "label_en": "type",
+    "display_label": "DC Type"
+  },
+  "DCTERMS_0007": {
+    "uri": "http://purl.org/dc/terms/format",
+    "label_en": "format",
+    "display_label": "Format"
+  },
+  "DCTERMS_0008": {
+    "uri": "http://purl.org/dc/terms/identifier",
+    "label_en": "identifier",
+    "display_label": "Identifier"
+  },
+  "DCTERMS_0009": {
+    "uri": "http://purl.org/dc/terms/source",
+    "label_en": "source",
+    "display_label": "Source"
+  },
+  "DCTERMS_0010": {
+    "uri": "http://purl.org/dc/terms/language",
+    "label_en": "language",
+    "display_label": "Language"
+  },
+  "SKOS_0001": {
+    "uri": "http://www.w3.org/2004/02/skos/core#Concept",
+    "label_en": "concept",
+    "display_label": "Concept"
+  },
+  "SKOS_0002": {
+    "uri": "http://www.w3.org/2004/02/skos/core#ConceptScheme",
+    "label_en": "concept scheme",
+    "display_label": "Concept Scheme"
+  },
+  "SKOS_0003": {
+    "uri": "http://www.w3.org/2004/02/skos/core#prefLabel",
+    "label_en": "preferred label",
+    "display_label": "Preferred Label"
+  },
+  "SKOS_0004": {
+    "uri": "http://www.w3.org/2004/02/skos/core#altLabel",
+    "label_en": "alternative label",
+    "display_label": "Alternative Label"
+  },
+  "SKOS_0005": {
+    "uri": "http://www.w3.org/2004/02/skos/core#broader",
+    "label_en": "broader",
+    "display_label": "Broader"
+  },
+  "SKOS_0006": {
+    "uri": "http://www.w3.org/2004/02/skos/core#narrower",
+    "label_en": "narrower",
+    "display_label": "Narrower"
+  },
+  "SKOS_0007": {
+    "uri": "http://www.w3.org/2004/02/skos/core#related",
+    "label_en": "related",
+    "display_label": "Related"
+  }
+}

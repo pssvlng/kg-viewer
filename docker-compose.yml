@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Angular Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "4200:80"
+    depends_on:
+      - backend
+    networks:
+      - kg-network
+
+  # Python Flask Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - VIRTUOSO_URL=http://virtuoso:8890
+      - FLASK_ENV=production
+    depends_on:
+      - virtuoso
+    networks:
+      - kg-network
+    volumes:
+      - ./backend:/app
+
+  # Virtuoso Triple Store with Web Interface
+  virtuoso:
+    image: tenforce/virtuoso:latest
+    ports:
+      - "8890:8890"
+      - "1111:1111"
+    environment:
+      - DBA_PASSWORD=dba
+      - SPARQL_UPDATE=true
+      - DEFAULT_GRAPH=http://localhost/graph/default
+    volumes:
+      - virtuoso-data:/database
+    networks:
+      - kg-network
+
+  # LODView Linked Data Browser
+  lodview:
+    image: linkeddatacenter/lodview:latest
+    ports:
+      - "8080:8080"
+    environment:
+      LODVIEW_SPARQLENDPOINT: http://virtuoso:8890/sparql
+      LODVIEW_URISPACE: http://localhost:8080/
+      LODVIEW_PUBLICURLPREFIX: auto
+    depends_on:
+      - virtuoso
+    networks:
+      - kg-network
+
+networks:
+  kg-network:
+    driver: bridge
+
+volumes:
+  virtuoso-data:
