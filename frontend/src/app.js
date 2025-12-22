@@ -1,13 +1,243 @@
-console.log('Frontend JavaScript loaded successfully - VERSION: 20241208_SUMMARY_FIX_V2');
-console.log('Using showEntityTabsDirectly function - Graph info in Summary tab');
+console.log('Frontend JavaScript loaded successfully - VERSION: 20250101_CONFIG_MGMT');
+console.log('Added configuration management and removed hardcoded URLs');
 
-const API_URL = 'http://localhost:5000';
+// Global variables
 let currentJobId = null;
 let pollInterval = null;
+let currentGraphsPage = 1;
+const graphsPerPage = 10;
+let allGraphs = [];
+let filteredGraphs = [];
+let appConfig = null;
+
+// Toast notification system
+function showToast(message, type = 'success', duration = 4000) {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  
+  container.appendChild(toast);
+  
+  // Trigger animation
+  setTimeout(() => toast.classList.add('show'), 100);
+  
+  // Auto-remove toast
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => container.removeChild(toast), 300);
+  }, duration);
+}
+
+function showSuccessToast(message) {
+  showToast(message, 'success');
+}
+
+function showErrorToast(message) {
+  showToast(message, 'error');
+}
+
+function showWarningToast(message) {
+  showToast(message, 'warning');
+}
+
+function showInfoToast(message) {
+  showToast(message, 'info');
+}
+
+// Main tab switching functionality
+function switchMainTab(tabName) {
+  // Remove active class from all main tabs
+  document.querySelectorAll('.main-tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  
+  // Hide all main tab contents
+  document.querySelectorAll('.main-tab-content').forEach(content => {
+    content.classList.remove('active');
+  });
+  
+  // Show selected tab content
+  document.getElementById(`${tabName}-content`).classList.add('active');
+  
+  // Add active class to selected tab
+  document.querySelector(`.main-tab[onclick*="${tabName}"]`).classList.add('active');
+  
+  // Load graphs if switching to view-edit tab
+  if (tabName === 'view-edit') {
+    // Wait a bit to ensure configuration is loaded
+    setTimeout(loadGraphsList, 100);
+  }
+}
+
+// Make critical functions available globally immediately for onclick handlers
+window.switchMainTab = switchMainTab;
+
+// Named graphs management functionality
+async function loadGraphsList() {
+  const container = document.getElementById('graphsTableContainer');
+  container.innerHTML = '<div class="loading">Loading graphs...</div>';
+  
+  try {
+    // Ensure configuration service is available
+    if (!window.configService) {
+      throw new Error('Configuration service not available');
+    }
+    
+    const response = await fetch(window.configService.getApiUrl('/api/graphs'));
+    const data = await response.json();
+    
+    console.log('Graphs API response:', data);
+    
+    if (response.ok) {
+      allGraphs = data.graphs || [];
+      filteredGraphs = [...allGraphs];
+      renderGraphsTable();
+    } else {
+      container.innerHTML = `<div class="error">Error loading graphs: ${data.error || 'Unknown error'}</div>`;
+    }
+  } catch (error) {
+    console.error('Error loading graphs:', error);
+    showErrorToast(`Failed to load graphs: ${error.message}`);
+    container.innerHTML = `<div class="error">Error loading graphs: ${error.message}</div>`;
+  }
+}
+
+function filterGraphs() {
+  const searchTerm = document.getElementById('graphsFilter').value.toLowerCase();
+  filteredGraphs = allGraphs.filter(graph => 
+    graph.name.toLowerCase().includes(searchTerm)
+  );
+  currentGraphsPage = 1;
+  renderGraphsTable();
+}
+
+function renderGraphsTable() {
+  const container = document.getElementById('graphsTableContainer');
+  const startIndex = (currentGraphsPage - 1) * graphsPerPage;
+  const endIndex = startIndex + graphsPerPage;
+  const pageGraphs = filteredGraphs.slice(startIndex, endIndex);
+  
+  if (filteredGraphs.length === 0) {
+    container.innerHTML = '<div class="loading">No graphs found.</div>';
+    document.getElementById('graphsPagination').style.display = 'none';
+    return;
+  }
+  
+  let html = `
+    <table class="graphs-table">
+      <thead>
+        <tr>
+          <th>Graph Name</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+  
+  pageGraphs.forEach(graph => {
+    html += `
+      <tr>
+        <td><strong>${graph.name}</strong></td>
+        <td>
+          <button class="delete-btn" onclick="confirmDeleteGraph('${graph.name}')" title="Delete graph">
+            <span class="material-icons">delete</span>
+          </button>
+        </td>
+      </tr>
+    `;
+  });
+  
+  html += '</tbody></table>';
+  container.innerHTML = html;
+  
+  // Update pagination
+  renderGraphsPagination();
+}
+
+function renderGraphsPagination() {
+  const paginationContainer = document.getElementById('graphsPagination');
+  const totalPages = Math.ceil(filteredGraphs.length / graphsPerPage);
+  
+  if (totalPages <= 1) {
+    paginationContainer.style.display = 'none';
+    return;
+  }
+  
+  paginationContainer.style.display = 'block';
+  let html = '';
+  
+  // Previous button
+  if (currentGraphsPage > 1) {
+    html += `<button onclick="changeGraphsPage(${currentGraphsPage - 1})">← Previous</button>`;
+  }
+  
+  // Page numbers
+  for (let i = 1; i <= Math.min(totalPages, 10); i++) {
+    const activeClass = i === currentGraphsPage ? 'active' : '';
+    html += `<button class="${activeClass}" onclick="changeGraphsPage(${i})">${i}</button>`;
+  }
+  
+  // Next button
+  if (currentGraphsPage < totalPages) {
+    html += `<button onclick="changeGraphsPage(${currentGraphsPage + 1})">Next →</button>`;
+  }
+  
+  html += `<p style="margin-top: 10px;">Page ${currentGraphsPage} of ${totalPages} (${filteredGraphs.length} total graphs)</p>`;
+  
+  paginationContainer.innerHTML = html;
+}
+
+function changeGraphsPage(page) {
+  currentGraphsPage = page;
+  renderGraphsTable();
+}
+
+function refreshGraphsList() {
+  loadGraphsList();
+  showInfoToast('Graphs list refreshed');
+}
+
+function confirmDeleteGraph(graphName) {
+  if (confirm(`Are you sure you want to delete the graph "${graphName}"? This action cannot be undone.`)) {
+    deleteGraph(graphName);
+  }
+}
+
+async function deleteGraph(graphName) {
+  try {
+    const response = await fetch(window.configService.getApiUrl(`/api/graphs/${encodeURIComponent(graphName)}`), {
+      method: 'DELETE'
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok) {
+      showSuccessToast(`Graph "${graphName}" deleted successfully`);
+      loadGraphsList(); // Refresh the list
+    } else {
+      showErrorToast(`Failed to delete graph: ${result.error || 'Unknown error'}`);
+    }
+  } catch (error) {
+    console.error('Error deleting graph:', error);
+    showErrorToast(`Error deleting graph: ${error.message}`);
+  }
+}
 
 // Wait for DOM to be fully loaded
-document.addEventListener('DOMContentLoaded', function() {
-  console.log('DOM loaded, setting up event listeners');
+document.addEventListener('DOMContentLoaded', async function() {
+  console.log('DOM loaded, initializing configuration...');
+  
+  // Initialize configuration
+  try {
+    appConfig = await window.configService.loadConfig();
+    console.log('Configuration loaded:', appConfig);
+  } catch (error) {
+    console.error('Failed to load configuration:', error);
+    appConfig = null;
+  }
+  
+  console.log('Setting up event listeners...');
   
   document.getElementById('uploadForm').addEventListener('submit', async function(e) {
     e.preventDefault();
@@ -30,7 +260,7 @@ document.addEventListener('DOMContentLoaded', function() {
       document.getElementById('progressSection').style.display = 'block';
       document.getElementById('message').innerHTML = '';
       
-      const response = await fetch(`${API_URL}/upload_file`, {
+      const response = await fetch(window.configService.getApiUrl('/upload_file'), {
         method: 'POST',
         body: formData
       });
@@ -39,7 +269,7 @@ document.addEventListener('DOMContentLoaded', function() {
       
       if (result.success && result.jobId) {
         currentJobId = result.jobId;
-        showMessage(`Upload started successfully! Tracking job: ${result.jobId}`, 'success');
+        showSuccessToast(`Upload started successfully! Tracking job: ${result.jobId}`);
         startPolling();
       } else {
         throw new Error(result.error || 'Upload failed');
@@ -47,6 +277,7 @@ document.addEventListener('DOMContentLoaded', function() {
       
     } catch (error) {
       showMessage(`Error: ${error.message}`, 'error');
+      showErrorToast(`Upload error: ${error.message}`);
       document.getElementById('uploadBtn').disabled = false;
       document.getElementById('progressSection').style.display = 'none';
     }
@@ -55,7 +286,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function startPolling() {
     pollInterval = setInterval(async () => {
       try {
-        const response = await fetch(`${API_URL}/upload/status/${currentJobId}`);
+        const response = await fetch(window.configService.getApiUrl(`/upload/status/${currentJobId}`));
         const job = await response.json();
         
         updateProgress(job.progress || 0);
@@ -68,6 +299,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (job.status === 'failed') {
           clearInterval(pollInterval);
           showMessage(`Upload failed: ${job.error_message}`, 'error');
+          showErrorToast(`Processing failed: ${job.error_message}`);
           document.getElementById('uploadBtn').disabled = false;
           document.getElementById('progressSection').style.display = 'none';
         }
@@ -97,29 +329,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (job.entityStats && job.entityStats.entityTypes && job.entityStats.entityTypes.length > 0) {
       console.log('Found entity stats, showing tabs');
+      showSuccessToast(`Upload completed! Found ${job.entityStats.totalTypes} entity types with ${job.entityStats.totalEntities} total entities.`);
       // Show tabs directly in resultsContent to bypass visibility issues
       showEntityTabsDirectly(job.entityStats.entityTypes, graphName, job);
     } else {
       console.log('No entity stats found or empty');
+      showSuccessToast(`Upload completed! ${job.total_triples} triples processed.`);
       // Fallback: show basic results if no entity stats
       showBasicResults(graphName, job);
     }
   }
   
   function showBasicResults(graphName, job) {
-    const graphUri = `http://localhost:8080/graph/${graphName}`;
+    const graphUri = window.configService.getGraphUri(graphName);
     const sparqlQuery = `select * from <${graphUri}> where { ?s ?p ?o } LIMIT 100`;
-    const sparqlUrl = `http://localhost:8890/sparql?query=${encodeURIComponent(sparqlQuery)}`;
+    const sparqlUrl = `${window.configService.getSparqlEndpoint()}?qtxt=${encodeURIComponent(sparqlQuery)}`;
 
     const resultsHtml = `
-      <div class="message success">
-        <strong>Upload Completed Successfully!</strong>
-      </div>
       <p><strong>Graph Name:</strong> ${graphName}</p>
       <p><strong>Graph URI:</strong> <code>${graphUri}</code></p>
       <p><strong>Total Triples:</strong> ${job.total_triples}</p>
       <p><strong>SPARQL Endpoint:</strong> <a href="${sparqlUrl}" target="_blank" class="endpoint-link">Query Data</a></p>
-      <p><strong>LODView Browser:</strong> <a href="http://localhost:8080" target="_blank" class="endpoint-link">Browse RDF Resources</a></p>
+      <p><strong>LODView Browser:</strong> <a href="${window.configService.getLodviewUrl()}" target="_blank" class="endpoint-link">Browse RDF Resources</a></p>
     `;
 
     document.getElementById('resultsContent').innerHTML = resultsHtml;
@@ -132,27 +363,26 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Graph name:', graphName);
     console.log('Total triples:', job.total_triples);
     
-    const graphUri = `http://localhost:8080/graph/${graphName}`;
+    const graphUri = window.configService.getGraphUri(graphName);
     const sparqlQuery = `select * from <${graphUri}> where { ?s ?p ?o } LIMIT 100`;
-    const sparqlUrl = `http://localhost:8890/sparql?query=${encodeURIComponent(sparqlQuery)}`;
+    const sparqlUrl = `${window.configService.getSparqlEndpoint()}?qtxt=${encodeURIComponent(sparqlQuery)}`;
     
     // Create the complete tabs HTML directly
     let tabsHtml = `
-      <div class="message success">
-        <strong>Upload Completed Successfully!</strong>
-      </div>
       <h2>Knowledge Graph Analysis Results</h2>
       
       <div style="margin: 20px 0; padding: 20px; border: 1px solid #ccc; border-radius: 8px; background: white;">
-        <div class="tabs" style="border-bottom: 2px solid #e0e0e0; margin-bottom: 20px;">
-          <button class="tab active" onclick="activateTabDirect('summary')" style="display: inline-block; padding: 10px 20px; cursor: pointer; border: none; background: none; font-size: 14px; margin-right: 5px; border-bottom: 2px solid #1976d2; color: #1976d2; font-weight: bold;">Summary</button>`;
+        <div class="tabs-container" style="border-bottom: 2px solid #e0e0e0; margin-bottom: 20px; position: relative;">
+          <div class="tabs" style="display: flex; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #ccc transparent; white-space: nowrap; padding-bottom: 2px;">
+            <button class="tab active" onclick="activateTabDirect('summary')" style="flex-shrink: 0; padding: 10px 20px; cursor: pointer; border: none; background: none; font-size: 14px; margin-right: 5px; border-bottom: 2px solid #1976d2; color: #1976d2; font-weight: bold;">Summary</button>`;
     
     // Add entity type tabs
     entityTypes.forEach(entityType => {
-      tabsHtml += `<button class="tab" onclick="activateTabDirect('${encodeURIComponent(entityType.uri)}')" style="display: inline-block; padding: 10px 20px; cursor: pointer; border: none; background: none; font-size: 14px; margin-right: 5px; border-bottom: 2px solid transparent;">${entityType.name} (${entityType.count})</button>`;
+      tabsHtml += `<button class="tab" onclick="activateTabDirect('${encodeURIComponent(entityType.uri)}')" style="flex-shrink: 0; padding: 10px 20px; cursor: pointer; border: none; background: none; font-size: 14px; margin-right: 5px; border-bottom: 2px solid transparent; white-space: nowrap;">${entityType.name} (${entityType.count})</button>`;
     });
     
     tabsHtml += `
+          </div>
         </div>
         
         <div id="tab-content-summary" class="tab-content" style="display: block;">
@@ -160,7 +390,7 @@ document.addEventListener('DOMContentLoaded', function() {
           <p><strong>Graph Name:</strong> ${graphName}</p>
           <p><strong>Total Triples:</strong> ${job.total_triples}</p>
           <p><strong>SPARQL Endpoint:</strong> <a href="${sparqlUrl}" target="_blank" class="endpoint-link">Query Data</a></p>
-          <p><strong>LODView Browser:</strong> <a href="http://localhost:8080" target="_blank" class="endpoint-link">Browse RDF Resources</a></p>
+          <p><strong>LODView Browser:</strong> <a href="${window.configService.getLodviewUrl()}" target="_blank" class="endpoint-link">Browse RDF Resources</a></p>
           
           <br>
 
@@ -300,7 +530,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     try {
       const searchFilter = document.getElementById(`filter-${encodeURIComponent(typeUri)}`)?.value || '';
-      const url = `${API_URL}/api/entities/${window.currentGraphName}?type=${encodeURIComponent(typeUri)}&page=${page}&limit=20&search=${encodeURIComponent(searchFilter)}`;
+      const url = window.configService.getApiUrl(`/api/entities/${window.currentGraphName}?type=${encodeURIComponent(typeUri)}&page=${page}&limit=20&search=${encodeURIComponent(searchFilter)}`);
       
       console.log('Fetching URL:', url);
       
@@ -318,6 +548,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     } catch (error) {
       console.error('Fetch error:', error);
+      showErrorToast(`Failed to load entities: ${error.message}`);
       container.innerHTML = `<div class="error">Error loading entities: ${error.message}</div>`;
     }
   }
@@ -396,11 +627,19 @@ document.addEventListener('DOMContentLoaded', function() {
     currentJobId = null;
     window.currentGraphName = null;
     window.entityTypes = null;
-  }  // Make functions available globally for onclick handlers
+  }
+  
+  // Make functions available globally for onclick handlers
   window.activateTab = activateTab;
   window.activateTabDirect = activateTabDirect;
   window.loadEntitiesByType = loadEntitiesByType;
   window.filterEntities = filterEntities;
   window.resetForm = resetForm;
+  window.loadGraphsList = loadGraphsList;
+  window.filterGraphs = filterGraphs;
+  window.changeGraphsPage = changeGraphsPage;
+  window.refreshGraphsList = refreshGraphsList;
+  window.confirmDeleteGraph = confirmDeleteGraph;
+  window.deleteGraph = deleteGraph;
   
 }); // End DOMContentLoaded

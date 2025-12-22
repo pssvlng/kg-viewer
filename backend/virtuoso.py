@@ -4,8 +4,9 @@ from requests.auth import HTTPDigestAuth
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import time
+from config import config
 
-VIRTUOSO_URL = os.getenv('VIRTUOSO_URL', 'http://localhost:8890')  # Keep for Virtuoso endpoint
+VIRTUOSO_URL = config.virtuoso_url
 SPARQL_ENDPOINT = f"{VIRTUOSO_URL}/sparql"
 
 endpoint = f"{VIRTUOSO_URL}/sparql-graph-crud-auth"

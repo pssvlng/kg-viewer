@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <title>Knowledge Graph Viewer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Angular Material Icons -->
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -129,6 +131,98 @@
     .tab-content.active {
       display: block;
     }
+    /* Scrollable tabs styles */
+    .tabs-container {
+      position: relative;
+    }
+    .tabs {
+      scrollbar-width: thin;
+      scrollbar-color: #ccc transparent;
+    }
+    .tabs::-webkit-scrollbar {
+      height: 6px;
+    }
+    .tabs::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 3px;
+    }
+    .tabs::-webkit-scrollbar-thumb {
+      background: #ccc;
+      border-radius: 3px;
+    }
+    .tabs::-webkit-scrollbar-thumb:hover {
+      background: #999;
+    }
+    /* Toast notification styles */
+    .toast-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 1000;
+    }
+    .toast {
+      background: #4CAF50;
+      color: white;
+      padding: 16px 24px;
+      margin-bottom: 10px;
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      max-width: 350px;
+      transform: translateY(100px);
+      transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+      opacity: 0;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    .toast.error {
+      background: #f44336;
+    }
+    .toast.warning {
+      background: #ff9800;
+    }
+    .toast.info {
+      background: #2196F3;
+    }
+    
+    /* Main application tabs */
+    .main-tabs {
+      border-bottom: 3px solid #e0e0e0;
+      margin-bottom: 30px;
+      background: white;
+      border-radius: 8px 8px 0 0;
+      overflow: hidden;
+    }
+    .main-tab {
+      display: inline-block;
+      padding: 15px 25px;
+      cursor: pointer;
+      border: none;
+      background: #f5f5f5;
+      font-size: 16px;
+      font-weight: 500;
+      margin-right: 2px;
+      border-bottom: 3px solid transparent;
+      transition: all 0.3s;
+    }
+    .main-tab:hover {
+      background-color: #e3f2fd;
+    }
+    .main-tab.active {
+      background: white;
+      border-bottom-color: #1976d2;
+      color: #1976d2;
+      font-weight: bold;
+    }
+    .main-tab-content {
+      display: none;
+    }
+    .main-tab-content.active {
+      display: block;
+    }
     .entity-filter {
       margin-bottom: 20px;
     }
@@ -153,6 +247,91 @@
     }
     .results.visible {
       display: block;
+    }
+    
+    /* Graph management styles */
+    .graphs-filter {
+      margin-bottom: 20px;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+    }
+    .graphs-filter input {
+      width: 300px;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .graphs-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    .graphs-table th, .graphs-table td {
+      text-align: left;
+      padding: 12px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .graphs-table th {
+      background-color: #f5f5f5;
+      font-weight: bold;
+    }
+    .graphs-table tr:hover {
+      background-color: #f9f9f9;
+    }
+    .graphs-header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 20px;
+      gap: 12px;
+    }
+    .graphs-header h2 {
+      margin: 0;
+    }
+    .refresh-btn {
+      background-color: #1976d2;
+      color: white;
+      border: none;
+      padding: 6px;
+      border-radius: 50%;
+      cursor: pointer;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.2s, transform 0.2s;
+      font-size: 0;
+    }
+    .refresh-btn:hover {
+      background-color: #1565c0;
+      transform: rotate(180deg);
+    }
+    .refresh-btn .material-icons {
+      font-size: 18px;
+      line-height: 1;
+    }
+    .delete-btn {
+      background-color: transparent;
+      color: #d32f2f;
+      border: 1px solid #e0e0e0;
+      padding: 4px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+    }
+    .delete-btn:hover {
+      background-color: #d32f2f;
+      color: white;
+      border-color: #d32f2f;
+    }
+    .delete-btn .material-icons {
+      font-size: 16px;
     }
     .entity-table-container {
       max-height: 400px;
@@ -246,12 +425,23 @@
   </style>
 </head>
 <body>
+  <!-- Toast notification container -->
+  <div class="toast-container" id="toastContainer"></div>
+  
   <div class="header">
     <h1>Knowledge Graph Viewer</h1>
     <p>Upload and analyze TTL files in RDF knowledge graphs</p>
   </div>
   
-  <div class="card">
+  <!-- Main Application Tabs -->
+  <div class="main-tabs">
+    <button class="main-tab active" onclick="switchMainTab('upload')">Upload</button>
+    <button class="main-tab" onclick="switchMainTab('view-edit')">View/Edit</button>
+  </div>
+  
+  <!-- Upload Tab Content -->
+  <div id="upload-content" class="main-tab-content active">
+    <div class="card">
     <h2>Upload TTL File</h2>
     <form id="uploadForm">
       <div class="form-group">
@@ -295,7 +485,33 @@
     
     <button class="btn" onclick="resetForm()">New Upload</button>
   </div>
+  </div>
+  
+  <!-- View/Edit Tab Content -->
+  <div id="view-edit-content" class="main-tab-content">
+    <div class="card">
+      <div class="graphs-header">
+        <h2>Named Graphs</h2>
+        <button class="refresh-btn" onclick="refreshGraphsList()" title="Refresh graphs list">
+          <span class="material-icons">refresh</span>
+        </button>
+      </div>
+      
+      <div class="graphs-filter">
+        <input type="text" id="graphsFilter" placeholder="Search graphs..." onkeyup="filterGraphs()">
+      </div>
+      
+      <div id="graphsTableContainer">
+        <div class="loading">Loading graphs...</div>
+      </div>
+      
+      <div class="pagination" id="graphsPagination" style="display: none;">
+        <!-- Pagination will be dynamically generated -->
+      </div>
+    </div>
+  </div>
 
-  <script src="app.js?t=1765215100"></script>
+  <script src="config.js"></script>
+  <script src="app.js?t=1735171000"></script>
 </body>
 </html>

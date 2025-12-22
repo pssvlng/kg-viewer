@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Add SSL certificates in production
+      # - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+      - virtuoso
+      - lodview
+    networks:
+      - kg-network
+
+  frontend:
+    extends:
+      file: docker-compose.yml
+      service: frontend
+    ports: []  # No direct port exposure in production
+
+  backend:
+    extends:
+      file: docker-compose.yml
+      service: backend
+    ports: []  # No direct port exposure in production
+
+  virtuoso:
+    extends:
+      file: docker-compose.yml
+      service: virtuoso
+    ports: []  # No direct port exposure in production
+
+  lodview:
+    extends:
+      file: docker-compose.yml
+      service: lodview
+    ports: []  # No direct port exposure in production
+
+networks:
+  kg-network:
+    driver: bridge
+
+volumes:
+  virtuoso-data:

@@ -9,13 +9,32 @@ import time
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import Dict, Optional, List
+import requests
+from requests.auth import HTTPDigestAuth
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from virtuoso import storeDataToGraph, storeDataToGraphInBatches, query_sparql
+from config import config
 
 app = Flask(__name__)
 CORS(app)
 
-# Configure maximum upload size (1GB)
-app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB in bytes
+# Configure maximum upload size from config
+app.config['MAX_CONTENT_LENGTH'] = config.max_content_length
+
+# Create session for graph management (skip if requests not available)
+try:
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+except:
+    session = None
 
 # Upload Job Management
 @dataclass
@@ -109,9 +128,14 @@ def get_job(job_id: str) -> Optional[UploadJob]:
     with job_lock:
         return upload_jobs.get(job_id)
 
-# Virtuoso configuration
-VIRTUOSO_URL = os.getenv('VIRTUOSO_URL', 'http://localhost:8890')
-SPARQL_ENDPOINT = f"{VIRTUOSO_URL}/sparql"
+# Configuration endpoint
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Get application configuration for frontend"""
+    return jsonify({
+        "success": True,
+        "config": config.to_dict()
+    })
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -119,8 +143,9 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "service": "Knowledge Graph Viewer Backend",
-        "virtuoso_url": VIRTUOSO_URL,
-        "sparql_endpoint": SPARQL_ENDPOINT
+        "virtuoso_url": config.virtuoso_url,
+        "sparql_endpoint": config.virtuoso_sparql_endpoint,
+        "external_virtuoso_url": config.external_virtuoso_url
     })
 
 @app.route('/upload/status/<job_id>', methods=['GET'])
@@ -163,7 +188,7 @@ def get_upload_analysis_progress(job_id):
 def get_entity_statistics(graph_name: str) -> dict:
     """Get entity type statistics for a graph"""
     try:
-        graph_uri = f"http://localhost:8080/graph/{graph_name}"
+        graph_uri = config.get_graph_uri(graph_name)
         
         # Query to get all types and their counts
         query = f"""SELECT ?type (COUNT(?entity) AS ?count) 
@@ -227,7 +252,7 @@ def get_entities_by_type(graph_name):
             return jsonify({'error': 'Missing type parameter'}), 400
         type_uri = unquote(type_uri)
         
-        graph_uri = f"http://localhost:8080/graph/{graph_name}"
+        graph_uri = config.get_graph_uri(graph_name)
         
         # Get pagination parameters
         page = int(request.args.get('page', 1))
@@ -342,7 +367,7 @@ def force_complete_job(job_id):
                 'graphName': job.graph_name,
                 'graphId': job.graph_name,
                 'triplesCount': job.total_triples,
-                'sparqlEndpoint': SPARQL_ENDPOINT
+                'sparqlEndpoint': config.external_virtuoso_sparql_endpoint
             }
         }]
         
@@ -366,11 +391,11 @@ def process_upload_async(job_id: str, graph: Graph, graph_name: str):
         
         # Create graph URI - use default if graph_name is empty
         if not graph_name or graph_name.strip() == '':
-            graph_uri = "http://localhost:8080/graph/default"
+            graph_uri = config.default_graph_uri
         else:
-            graph_uri = f"http://localhost:8080/graph/{graph_name}"
+            graph_uri = config.get_graph_uri(graph_name)
         
-        sparql_endpoint = "http://localhost:8890/sparql"
+        sparql_endpoint = config.external_virtuoso_sparql_endpoint
         
         # Progress callback function
         def progress_callback(batch_num, processed_triples, total_triples):
@@ -615,6 +640,150 @@ def upload_file():
     except Exception as e:
         print(f"Error starting upload job: {e}")
         return jsonify({"error": f"Failed to start upload: {str(e)}"}), 500
+
+@app.route('/api/graphs', methods=['GET'])
+def list_graphs():
+    """List all named graphs in the system"""
+    try:
+        # SPARQL query to get all named graphs
+        sparql_query = """
+        SELECT DISTINCT ?graph
+        WHERE {
+          GRAPH ?graph { ?s ?p ?o }
+        }
+        ORDER BY ?graph
+        """
+        
+        result = query_sparql(sparql_query)
+        
+        if result and isinstance(result, list):
+            graphs = []
+            for binding in result:
+                if 'graph' in binding:
+                    graph_uri = binding['graph']['value']
+                    # Extract graph name from URI and filter out system graphs
+                    if graph_uri.startswith(f'{config.graph_base_uri}/'):
+                        graph_name = graph_uri.replace(f'{config.graph_base_uri}/', '')
+                        graphs.append({
+                            'name': graph_name,
+                            'uri': graph_uri
+                        })
+                    # Skip system graphs
+            
+            return jsonify({
+                'success': True,
+                'graphs': graphs,
+                'count': len(graphs)
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'graphs': [],
+                'count': 0
+            })
+            
+    except Exception as e:
+        print(f"Error listing graphs: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to list graphs: {str(e)}'
+        }), 500
+
+@app.route('/api/graphs/<graph_name>', methods=['DELETE'])
+def delete_graph(graph_name):
+    """Delete a specific named graph"""
+    try:
+        # Construct the graph URI
+        if graph_name == 'default':
+            graph_uri = config.default_graph_uri
+        else:
+            graph_uri = config.get_graph_uri(graph_name)
+        
+        print(f"Attempting to delete graph: {graph_uri}")
+        
+        # First, check if the graph exists and get triple count
+        count_query = f"""
+        SELECT (COUNT(*) AS ?count)
+        WHERE {{
+          GRAPH <{graph_uri}> {{ ?s ?p ?o }}
+        }}
+        """
+        
+        count_result = query_sparql(count_query)
+        triple_count = 0
+        
+        if count_result and isinstance(count_result, list) and len(count_result) > 0:
+            binding = count_result[0]
+            if 'count' in binding:
+                triple_count = int(binding['count']['value'])
+        
+        if triple_count == 0:
+            return jsonify({
+                'success': False,
+                'error': f'Graph "{graph_name}" not found or is empty'
+            }), 404
+        
+        # Delete all triples in the graph using SPARQL UPDATE
+        delete_query = f"""
+        DELETE {{
+          GRAPH <{graph_uri}> {{
+            ?s ?p ?o
+          }}
+        }}
+        WHERE {{
+          GRAPH <{graph_uri}> {{
+            ?s ?p ?o
+          }}
+        }}
+        """
+        
+        # Execute the delete query using SPARQL endpoint
+        if session:
+            delete_url = config.virtuoso_sparql_endpoint
+            headers = {'Content-Type': 'application/sparql-update'}
+            
+            response = session.post(
+                delete_url,
+                data=delete_query,
+                headers=headers,
+                auth=HTTPDigestAuth('dba', 'dba'),
+                timeout=60
+            )
+            
+            if response.status_code in [200, 204]:
+                print(f"Successfully deleted graph {graph_uri} with {triple_count} triples")
+                return jsonify({
+                    'success': True,
+                    'message': f'Graph "{graph_name}" deleted successfully',
+                    'triples_deleted': triple_count
+                })
+            else:
+                print(f"Failed to delete graph. Status: {response.status_code}, Response: {response.text}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to delete graph. Server response: {response.status_code}'
+                }), 500
+        else:
+            # Fallback: try using query_sparql if requests is not available
+            try:
+                query_sparql(delete_query)
+                return jsonify({
+                    'success': True,
+                    'message': f'Graph "{graph_name}" deleted successfully',
+                    'triples_deleted': triple_count
+                })
+            except Exception as fallback_error:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to delete graph: {str(fallback_error)}'
+                }), 500
+            
+    except Exception as e:
+        print(f"Error deleting graph {graph_name}: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to delete graph: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
