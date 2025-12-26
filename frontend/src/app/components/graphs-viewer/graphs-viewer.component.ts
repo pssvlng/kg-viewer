@@ -1,12 +1,17 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ViewChild, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule, FormControl, ReactiveFormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
-import { MatTableModule } from '@angular/material/table';
+import { MatTableModule, MatTableDataSource } from '@angular/material/table';
+import { MatPaginatorModule, MatPaginator } from '@angular/material/paginator';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { GraphsService, Graph } from '../../services/graphs.service';
 import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component';
 
@@ -15,8 +20,13 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
+    ReactiveFormsModule,
     MatCardModule,
     MatTableModule,
+    MatPaginatorModule,
+    MatFormFieldModule,
+    MatInputModule,
     MatButtonModule,
     MatIconModule,
     MatDialogModule,
@@ -26,13 +36,41 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
   template: `
     <mat-card class="graphs-card">
       <mat-card-header>
-        <mat-card-title>Named Graphs</mat-card-title>
-        <mat-card-subtitle>View and manage knowledge graphs</mat-card-subtitle>
+        <div class="header-content">
+          <div class="title-section">
+            <div class="title-with-button">
+              <mat-card-title>Named Graphs</mat-card-title>
+              <button mat-mini-fab 
+                      color="primary"
+                      (click)="refreshGraphs()"
+                      matTooltip="Refresh Graphs"
+                      class="refresh-btn">
+                <mat-icon>refresh</mat-icon>
+              </button>
+            </div>
+            <mat-card-subtitle>View And Manage Knowledge Graphs</mat-card-subtitle>
+          </div>
+        </div>
       </mat-card-header>
       
       <mat-card-content>
+        <!-- Filter Section -->
+        <div class="filter-section">
+          <mat-form-field appearance="outline" class="filter-field">
+            <mat-label>Filter Graphs</mat-label>
+            <input matInput 
+                   [formControl]="filterControl"
+                   placeholder="Search by name or URI">
+            <mat-icon matSuffix 
+                      *ngIf="filterControl.value" 
+                      class="clear-icon"
+                      (click)="clearFilter()"
+                      matTooltip="Clear Filter">close</mat-icon>
+          </mat-form-field>
+        </div>
+        
         <div class="table-container">
-          <table mat-table [dataSource]="graphs" class="graphs-table">
+          <table mat-table [dataSource]="dataSource" class="graphs-table">
             
             <!-- Graph Name Column -->
             <ng-container matColumnDef="name">
@@ -57,13 +95,13 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
                 <button mat-icon-button 
                         class="view-btn"
                         (click)="viewGraphAnalysis(graph)"
-                        matTooltip="View graph analysis">
+                        matTooltip="View Graph Details">
                   <mat-icon>visibility</mat-icon>
                 </button>
                 <button mat-icon-button 
                         class="delete-btn"
                         (click)="deleteGraph(graph)"
-                        matTooltip="Delete graph"
+                        matTooltip="Delete Graph"
                         color="warn">
                   <mat-icon>delete</mat-icon>
                 </button>
@@ -73,25 +111,61 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
             <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
             <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
           </table>
+          
+          <mat-paginator #paginator
+                         [pageSizeOptions]="[5, 10, 25, 50]"
+                         [pageSize]="10"
+                         showFirstLastButtons>
+          </mat-paginator>
         </div>
         
         <div *ngIf="graphs.length === 0" class="no-graphs">
           <mat-icon>info</mat-icon>
-          <p>No graphs available. Upload some RDF data to get started.</p>
+          <p>No Graphs Available. Upload Some RDF Data To Get Started.</p>
         </div>
       </mat-card-content>
-      
-      <mat-card-actions>
-        <button mat-raised-button color="primary" (click)="refreshGraphs()">
-          <mat-icon>refresh</mat-icon>
-          Refresh
-        </button>
-      </mat-card-actions>
     </mat-card>
   `,
   styles: [`
     .graphs-card {
       margin: 20px 0;
+    }
+    
+    .header-content {
+      width: 100%;
+    }
+    
+    .title-section {
+      flex-grow: 1;
+    }
+    
+    .title-with-button {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
+    
+    .refresh-btn {
+      transform: scale(0.8);
+    }
+    
+    .filter-section {
+      margin: 20px 0;
+    }
+    
+    .filter-field {
+      width: 300px;
+    }
+    
+    .clear-icon {
+      cursor: pointer;
+      color: #666;
+      font-size: 18px;
+    }
+    
+    .clear-icon:hover {
+      color: #333;
     }
     
     .table-container {
@@ -140,9 +214,13 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
     }
   `]
 })
-export class GraphsViewerComponent implements OnInit {
+export class GraphsViewerComponent implements OnInit, AfterViewInit {
+  @ViewChild(MatPaginator) paginator!: MatPaginator;
+  
   graphs: Graph[] = [];
+  dataSource = new MatTableDataSource<Graph>([]);
   displayedColumns = ['name', 'uri', 'actions'];
+  filterControl = new FormControl('');
 
   constructor(
     private graphsService: GraphsService,
@@ -152,6 +230,37 @@ export class GraphsViewerComponent implements OnInit {
 
   ngOnInit() {
     this.loadGraphs();
+    this.setupFiltering();
+  }
+
+  ngAfterViewInit() {
+    this.dataSource.paginator = this.paginator;
+  }
+
+  setupFiltering() {
+    this.filterControl.valueChanges.pipe(
+      debounceTime(300),
+      distinctUntilChanged()
+    ).subscribe(filterValue => {
+      this.applyFilter(filterValue || '');
+    });
+  }
+
+  applyFilter(filterValue: string) {
+    this.dataSource.filter = filterValue.trim().toLowerCase();
+    
+    this.dataSource.filterPredicate = (data: Graph, filter: string) => {
+      const searchStr = (data.name + ' ' + data.uri).toLowerCase();
+      return searchStr.includes(filter);
+    };
+
+    if (this.dataSource.paginator) {
+      this.dataSource.paginator.firstPage();
+    }
+  }
+
+  clearFilter() {
+    this.filterControl.setValue('');
   }
 
   loadGraphs() {
@@ -159,20 +268,21 @@ export class GraphsViewerComponent implements OnInit {
       next: (response) => {
         if (response.success) {
           this.graphs = response.graphs;
+          this.dataSource.data = this.graphs;
         } else {
-          this.snackBar.open('Failed to load graphs', 'Close', { duration: 3000 });
+          this.snackBar.open('Failed To Load Graphs', 'Close', { duration: 3000 });
         }
       },
       error: (error) => {
         console.error('Error loading graphs:', error);
-        this.snackBar.open('Error loading graphs', 'Close', { duration: 3000 });
+        this.snackBar.open('Error Loading Graphs', 'Close', { duration: 3000 });
       }
     });
   }
 
   refreshGraphs() {
     this.loadGraphs();
-    this.snackBar.open('Graphs refreshed', 'Close', { duration: 2000 });
+    this.snackBar.open('Graphs Refreshed', 'Close', { duration: 2000 });
   }
 
   viewGraphAnalysis(graph: Graph) {

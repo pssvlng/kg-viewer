@@ -1,9 +1,9 @@
-import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, ViewChildren, QueryList, AfterViewInit } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, ViewChildren, ViewChild, QueryList, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, FormControl, ReactiveFormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { MatCardModule } from '@angular/material/card';
-import { MatTabsModule } from '@angular/material/tabs';
+import { MatTabsModule, MatTabGroup } from '@angular/material/tabs';
 import { MatTableModule, MatTableDataSource } from '@angular/material/table';
 import { MatPaginatorModule, MatPaginator, PageEvent } from '@angular/material/paginator';
 import { MatSortModule, MatSort } from '@angular/material/sort';
@@ -71,11 +71,11 @@ export interface TabInfo {
     <mat-card class="results-card">
       <mat-card-header>
         <mat-card-title>Knowledge Graph Analysis</mat-card-title>
-        <mat-card-subtitle>Analysis results for uploaded TTL data</mat-card-subtitle>
+        <mat-card-subtitle>Analysis Results For Uploaded TTL Data</mat-card-subtitle>
       </mat-card-header>
       
       <mat-card-content>
-        <mat-tab-group class="results-tabs" [dynamicHeight]="true">
+        <mat-tab-group #tabGroup class="results-tabs" [dynamicHeight]="true">
           <mat-tab 
             *ngFor="let tab of tabs; trackBy: trackByFn" 
             [label]="tab.label">
@@ -112,10 +112,6 @@ export interface TabInfo {
                   <a [href]="getSparqlQueryUrl(tab.uploadInfo)" target="_blank">{{ tab.uploadInfo?.sparqlEndpoint }}</a>
                 </div>
                 
-                <div class="result-item" *ngIf="tab.uploadInfo?.analysisResults">
-                  <strong>Classes Found:</strong> 
-                  <span class="count">{{ tab.uploadInfo?.analysisResults?.foundClassesCount }}</span>
-                </div>
               </div>
               
               <div class="content-text">
@@ -142,7 +138,9 @@ export interface TabInfo {
                     </ng-container>
                     
                     <tr mat-header-row *matHeaderRowDef="['label', 'count']"></tr>
-                    <tr mat-row *matRowDef="let row; columns: ['label', 'count']" class="clickable-row"></tr>
+                    <tr mat-row *matRowDef="let row; columns: ['label', 'count']" 
+                        class="clickable-row" 
+                        (click)="navigateToEntityTab(row.label, row.instanceCount)"></tr>
                   </table>
                 </div>
               </div>
@@ -157,7 +155,12 @@ export interface TabInfo {
                     <mat-label>Filter</mat-label>
                     <input matInput 
                            [formControl]="getFilterControl(tab)"
-                           placeholder="Filter results">
+                           placeholder="Filter Results">
+                    <mat-icon matSuffix 
+                              *ngIf="getFilterControl(tab).value" 
+                              class="clear-icon"
+                              (click)="clearFilter(tab)"
+                              matTooltip="Clear Filter">close</mat-icon>
                   </mat-form-field>
                   
                   <!-- Loading spinner for server-side tables -->
@@ -236,7 +239,7 @@ export interface TabInfo {
               <mat-paginator 
                 *ngIf="isServerSideDataSource(tab) && getServerDataSource(tab)"
                 [length]="(getServerDataSource(tab)!.pagination$ | async)?.totalItems || 0"
-                [pageSize]="(getServerDataSource(tab)!.pagination$ | async)?.pageSize || 50"
+                [pageSize]="(getServerDataSource(tab)!.pagination$ | async)?.pageSize || 25"
                 [pageIndex]="((getServerDataSource(tab)!.pagination$ | async)?.page || 1) - 1"
                 [pageSizeOptions]="[25, 50, 100, 250]"
                 (page)="onPageChange($event, tab)"
@@ -351,6 +354,16 @@ export interface TabInfo {
       margin-bottom: 20px;
     }
     
+    .clear-icon {
+      cursor: pointer;
+      color: #666;
+      font-size: 18px;
+    }
+    
+    .clear-icon:hover {
+      color: #333;
+    }
+    
     .results-table {
       width: 100%;
       min-width: 500px;
@@ -415,6 +428,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
   
   @ViewChildren(MatPaginator) paginators!: QueryList<MatPaginator>;
   @ViewChildren(MatSort) sorts!: QueryList<MatSort>;
+  @ViewChild('tabGroup') tabGroup!: MatTabGroup;
 
   constructor(
     private serverSideDataSourceService: ServerSideDataSourceService,
@@ -518,7 +532,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
     
     // Load initial data if we have the necessary information
     if (tab.uploadInfo?.graphName && tab.uploadInfo?.classUri) {
-      serverDataSource.loadData(tab.uploadInfo.graphName, tab.uploadInfo.classUri, 1, 50, '');
+      serverDataSource.loadData(tab.uploadInfo.graphName, tab.uploadInfo.classUri, 1, 25, '');
     }
   }
 
@@ -574,7 +588,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
           tab.uploadInfo.graphName,
           tab.uploadInfo.classUri,
           1, // Reset to first page
-          50, // Default page size
+          25, // Default page size
           filterValue
         );
       }
@@ -609,6 +623,11 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
     return this.filterControls.get(tab.label) || new FormControl('');
   }
 
+  clearFilter(tab: TabInfo) {
+    const filterControl = this.getFilterControl(tab);
+    filterControl.setValue('');
+  }
+
   getClassesDataSource(classesData: any[]): MatTableDataSource<any> {
     return new MatTableDataSource(classesData);
   }
@@ -633,6 +652,16 @@ LIMIT 1000`;
     
     const encodedQuery = encodeURIComponent(sparqlQuery);
     return `${uploadInfo.sparqlEndpoint}?query=${encodedQuery}`;
+  }
+
+  navigateToEntityTab(entityLabel: string, instanceCount: number) {
+    // Find the tab that matches this entity type
+    const targetTabLabel = `${entityLabel} (${instanceCount})`;
+    const tabIndex = this.tabs.findIndex(tab => tab.label === targetTabLabel);
+    
+    if (tabIndex !== -1 && this.tabGroup) {
+      this.tabGroup.selectedIndex = tabIndex;
+    }
   }
 
   newUpload() {

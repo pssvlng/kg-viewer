@@ -51,7 +51,7 @@ export class ServerSideDataSource extends DataSource<any> {
     this.paginationSubject.complete();
   }
 
-  loadData(graphName: string, classUri: string, page: number = 1, pageSize: number = 50, filter: string = '') {
+  loadData(graphName: string, classUri: string, page: number = 1, pageSize: number = 25, filter: string = '') {
     this.loadingSubject.next(true);
 
     const params = new HttpParams()

@@ -974,14 +974,14 @@ def get_class_instances_paginated(graph_name, class_uri):
     try:
         # Get query parameters
         page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('pageSize', 50, type=int)
+        page_size = request.args.get('pageSize', 25, type=int)
         filter_text = request.args.get('filter', '', type=str)
         
         # Validate parameters
         if page < 1:
             page = 1
         if page_size < 1 or page_size > 1000:  # Limit max page size
-            page_size = 50
+            page_size = 25
             
         # Calculate OFFSET for SPARQL
         offset = (page - 1) * page_size

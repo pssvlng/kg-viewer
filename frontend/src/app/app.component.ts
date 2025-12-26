@@ -33,8 +33,9 @@ import { GraphsViewerComponent } from './components/graphs-viewer/graphs-viewer.
         <mat-tab label="Upload">
           <div class="tab-content">
             <app-document-uploader 
-              [disabled]="!!currentJobId"
+              [disabled]="isUploading"
               (uploadStarted)="onUploadStarted($event)"
+              (newUploadStarted)="onNewUploadStarted()"
               (documentProcessed)="onDocumentProcessed($event)">
             </app-document-uploader>
             
@@ -86,28 +87,41 @@ export class AppComponent {
   results: any = null;
   currentJobId: string | null = null;
   selectedTabIndex = 0;
+  isUploading = false;
 
   onUploadStarted(jobInfo: { jobId: string, filename: string }) {
     this.currentJobId = jobInfo.jobId;
+    this.isUploading = true;
     this.results = null;
   }
 
   onDocumentProcessed(results: TabInfo[]) {
     this.results = results;
+    this.currentJobId = null;
+    this.isUploading = false;
+  }
+
+  onNewUploadStarted() {
+    this.results = null;
+    this.currentJobId = null;
+    this.isUploading = true;
   }
 
   onNavigationRequested(event: { action: string, data?: any }) {
     if (event.action === 'goBack') {
       this.currentJobId = null;
       this.results = null;
+      this.isUploading = false;
     } else if (event.action === 'showResults') {
       this.results = event.data;
       this.currentJobId = null;
+      this.isUploading = false;
     }
   }
 
   onNewUploadRequested() {
     this.results = null;
     this.currentJobId = null;
+    this.isUploading = false;
   }
 }

@@ -8,6 +8,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { DocumentService } from '../../services/document.service';
 
 @Component({
@@ -22,7 +23,8 @@ import { DocumentService } from '../../services/document.service';
     MatButtonModule,
     MatIconModule,
     MatProgressSpinnerModule,
-    MatSnackBarModule
+    MatSnackBarModule,
+    MatTooltipModule
   ],
   template: `
     <mat-card>
@@ -33,10 +35,15 @@ import { DocumentService } from '../../services/document.service';
       <mat-card-content>
         <div class="form-section">
           <mat-form-field appearance="outline" class="full-width">
-            <mat-label>Graph Name (optional)</mat-label>
+            <mat-label>Graph Name (Optional)</mat-label>
             <input matInput 
                    [(ngModel)]="graphName" 
-                   placeholder="Enter graph name or leave empty for default">
+                   placeholder="Enter Graph Name Or Leave Empty For Default">
+            <mat-icon matSuffix 
+                      *ngIf="graphName" 
+                      class="clear-icon"
+                      (click)="clearGraphName()"
+                      matTooltip="Clear Graph Name">close</mat-icon>
           </mat-form-field>
         </div>
         
@@ -99,6 +106,16 @@ import { DocumentService } from '../../services/document.service';
       width: 100%;
     }
     
+    .clear-icon {
+      cursor: pointer;
+      color: #666;
+      font-size: 18px;
+    }
+    
+    .clear-icon:hover {
+      color: #333;
+    }
+    
     button[disabled] {
       opacity: 0.6;
     }
@@ -112,6 +129,7 @@ export class DocumentUploaderComponent {
   @Input() disabled: boolean = false;
   @Output() documentProcessed = new EventEmitter<any>();
   @Output() uploadStarted = new EventEmitter<{jobId: string, filename: string}>();
+  @Output() newUploadStarted = new EventEmitter<void>();
   
   selectedFile: File | null = null;
   graphName: string = '';
@@ -132,11 +150,16 @@ export class DocumentUploaderComponent {
     return 'Upload TTL File';
   }
 
+  clearGraphName() {
+    this.graphName = '';
+  }
+
   onFileSelected(event: any) {
     const file = event.target.files[0];
     if (file && file.name.toLowerCase().endsWith('.ttl')) {
       this.selectedFile = file;
-      this.snackBar.open('TTL file selected', 'Close', {
+      this.newUploadStarted.emit(); // Clear previous results
+      this.snackBar.open('TTL File Selected', 'Close', {
         duration: 2000
       });
       // Automatically start upload when file is selected
@@ -169,13 +192,13 @@ export class DocumentUploaderComponent {
               jobId: result.jobId,
               filename: result.filename || this.selectedFile!.name
             });
-            this.snackBar.open('Upload started - progress will be shown', 'Close', {
+            this.snackBar.open('Upload Started - Progress Will Be Shown', 'Close', {
               duration: 3000
             });
           } else {
             // Handle upload response and start monitoring
             this.documentProcessed.emit(result);
-            this.snackBar.open('File uploaded and processed successfully!', 'Close', {
+            this.snackBar.open('File Uploaded And Processed Successfully!', 'Close', {
               duration: 3000
             });
           }
@@ -185,7 +208,7 @@ export class DocumentUploaderComponent {
         },
         error: (error) => {
           this.isProcessing = false;
-          this.snackBar.open('Upload error: ' + (error.error?.error || error.message), 'Close', {
+          this.snackBar.open('Upload Error: ' + (error.error?.error || error.message), 'Close', {
             duration: 5000
           });
           // Reset for retry
