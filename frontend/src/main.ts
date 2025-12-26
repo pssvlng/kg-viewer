@@ -17,6 +17,8 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatTableModule } from '@angular/material/table';
 import { MatPaginatorModule } from '@angular/material/paginator';
 import { MatSortModule } from '@angular/material/sort';
+import { MatDialogModule } from '@angular/material/dialog';
+import { MatTooltipModule } from '@angular/material/tooltip';
 
 bootstrapApplication(AppComponent, {
   providers: [
@@ -36,7 +38,9 @@ bootstrapApplication(AppComponent, {
       MatTabsModule,
       MatTableModule,
       MatPaginatorModule,
-      MatSortModule
+      MatSortModule,
+      MatDialogModule,
+      MatTooltipModule
     )
   ]
 }).catch(err => console.error(err));

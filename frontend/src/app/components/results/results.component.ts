@@ -1,15 +1,19 @@
-import { Component, EventEmitter, Input, Output, OnInit, ViewChild } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, ViewChildren, QueryList, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
+import { FormsModule, FormControl, ReactiveFormsModule } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
 import { MatCardModule } from '@angular/material/card';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatTableModule, MatTableDataSource } from '@angular/material/table';
-import { MatPaginatorModule, MatPaginator } from '@angular/material/paginator';
+import { MatPaginatorModule, MatPaginator, PageEvent } from '@angular/material/paginator';
 import { MatSortModule, MatSort } from '@angular/material/sort';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
+import { ServerSideDataSource, ServerSideDataSourceService } from '../../services/server-side-data-source.service';
 
 export interface UploadInfo {
   status: string;
@@ -19,6 +23,12 @@ export interface UploadInfo {
   graphUri: string;
   triplesCount: number;
   sparqlEndpoint: string;
+  classUri?: string; // Added for server-side pagination
+  classesOverview?: Array<{
+    label: string;
+    instanceCount: number;
+    uri: string;
+  }>;
   analysisResults?: {
     totalTriples: number;
     classDefinitionsLoaded: number;
@@ -45,6 +55,7 @@ export interface TabInfo {
   imports: [
     CommonModule,
     FormsModule,
+    ReactiveFormsModule,
     MatCardModule,
     MatTabsModule,
     MatTableModule,
@@ -53,7 +64,8 @@ export interface TabInfo {
     MatButtonModule,
     MatIconModule,
     MatFormFieldModule,
-    MatInputModule
+    MatInputModule,
+    MatProgressSpinnerModule
   ],
   template: `
     <mat-card class="results-card">
@@ -63,12 +75,12 @@ export interface TabInfo {
       </mat-card-header>
       
       <mat-card-content>
-        <mat-tab-group class="results-tabs">
+        <mat-tab-group class="results-tabs" [dynamicHeight]="true">
           <mat-tab 
             *ngFor="let tab of tabs; trackBy: trackByFn" 
             [label]="tab.label">
             
-            <!-- Summary View -->
+            <!-- Summary View with Classes Overview -->
             <div *ngIf="tab.type === 'summary'" class="summary-content">
               <div class="upload-summary" *ngIf="tab.uploadInfo">
                 <div class="result-item">
@@ -102,21 +114,41 @@ export interface TabInfo {
                 
                 <div class="result-item" *ngIf="tab.uploadInfo?.analysisResults">
                   <strong>Classes Found:</strong> 
-                  <span class="count">{{ tab.uploadInfo.analysisResults.foundClassesCount }}</span>
-                </div>
-                
-                <div class="result-item" *ngIf="tab.uploadInfo?.analysisResults">
-                  <strong>Class Definitions Loaded:</strong> 
-                  <span class="count">{{ tab.uploadInfo.analysisResults.classDefinitionsLoaded }}</span>
+                  <span class="count">{{ tab.uploadInfo?.analysisResults?.foundClassesCount }}</span>
                 </div>
               </div>
               
               <div class="content-text">
                 <pre>{{ tab.content }}</pre>
               </div>
+              
+              <!-- Classes Overview Table -->
+              <div *ngIf="tab.uploadInfo?.classesOverview?.length" class="classes-overview">
+                <h4>Entity Types Summary</h4>
+                <p><strong>Total Entity Types:</strong> {{ tab.uploadInfo?.classesOverview?.length }}</p>
+                <p><strong>Total Entities:</strong> {{ getTotalEntities(tab.uploadInfo?.classesOverview || []) }}</p>
+                <div class="table-container">
+                  <table mat-table [dataSource]="getClassesDataSource(tab.uploadInfo?.classesOverview || [])" class="classes-table">
+                    <ng-container matColumnDef="label">
+                      <th mat-header-cell *matHeaderCellDef>Entity Type</th>
+                      <td mat-cell *matCellDef="let element">
+                        <strong>{{ element.label }}</strong>
+                      </td>
+                    </ng-container>
+                    
+                    <ng-container matColumnDef="count">
+                      <th mat-header-cell *matHeaderCellDef>Count</th>
+                      <td mat-cell *matCellDef="let element">{{ element.instanceCount }}</td>
+                    </ng-container>
+                    
+                    <tr mat-header-row *matHeaderRowDef="['label', 'count']"></tr>
+                    <tr mat-row *matRowDef="let row; columns: ['label', 'count']" class="clickable-row"></tr>
+                  </table>
+                </div>
+              </div>
             </div>
             
-            <!-- Table View -->
+            <!-- Table View - Only Label and URI columns -->
             <div *ngIf="tab.type === 'table' && tab.data" class="table-content">
               <div class="table-header">
                 <h3>{{ tab.content }}</h3>
@@ -124,44 +156,90 @@ export interface TabInfo {
                   <mat-form-field appearance="outline">
                     <mat-label>Filter</mat-label>
                     <input matInput 
-                           (keyup)="applyFilter($event, tab)" 
+                           [formControl]="getFilterControl(tab)"
                            placeholder="Filter results">
                   </mat-form-field>
+                  
+                  <!-- Loading spinner for server-side tables -->
+                  <mat-spinner 
+                    *ngIf="isServerSideDataSource(tab) && (getServerDataSource(tab)?.loading$ | async)"
+                    diameter="20">
+                  </mat-spinner>
                 </div>
               </div>
               
               <div class="table-container">
+                <!-- Client-side table -->
                 <table mat-table 
-                       [dataSource]="getDataSource(tab)" 
+                       *ngIf="!isServerSideDataSource(tab)"
+                       [dataSource]="getClientDataSource(tab)" 
                        matSort 
                        class="results-table">
                   
-                  <!-- Dynamic columns -->
-                  <ng-container *ngFor="let column of getDisplayedColumns(tab)" 
-                                [matColumnDef]="column">
-                    <th mat-header-cell *matHeaderCellDef mat-sort-header>
-                      {{ getColumnLabel(column) }}
-                    </th>
+                  <!-- Label Column -->
+                  <ng-container matColumnDef="label">
+                    <th mat-header-cell *matHeaderCellDef mat-sort-header>Label</th>
                     <td mat-cell *matCellDef="let element">
-                      <span *ngIf="column === 'uri'">
-                        <a [href]="element[column]" target="_blank" 
-                           class="uri-link">{{ element[column] }}</a>
-                      </span>
-                      <span *ngIf="column !== 'uri'">
-                        {{ element[column] }}
-                      </span>
+                      <strong>{{ element.label || 'N/A' }}</strong>
                     </td>
                   </ng-container>
                   
-                  <tr mat-header-row 
-                      *matHeaderRowDef="getDisplayedColumns(tab)"></tr>
-                  <tr mat-row 
-                      *matRowDef="let row; columns: getDisplayedColumns(tab);"></tr>
+                  <!-- URI Column -->
+                  <ng-container matColumnDef="uri">
+                    <th mat-header-cell *matHeaderCellDef mat-sort-header>URI</th>
+                    <td mat-cell *matCellDef="let element">
+                      <a [href]="element.uri" target="_blank" 
+                         class="uri-link">{{ element.uri }}</a>
+                    </td>
+                  </ng-container>
+                  
+                  <tr mat-header-row *matHeaderRowDef="['label', 'uri']"></tr>
+                  <tr mat-row *matRowDef="let row; columns: ['label', 'uri'];"></tr>
+                </table>
+                
+                <!-- Server-side table -->
+                <table mat-table 
+                       *ngIf="isServerSideDataSource(tab) && getServerDataSource(tab)"
+                       [dataSource]="getServerDataSource(tab)!" 
+                       class="results-table">
+                  
+                  <!-- Label Column -->
+                  <ng-container matColumnDef="label">
+                    <th mat-header-cell *matHeaderCellDef>Label</th>
+                    <td mat-cell *matCellDef="let element">
+                      <strong>{{ element.label || 'N/A' }}</strong>
+                    </td>
+                  </ng-container>
+                  
+                  <!-- URI Column -->
+                  <ng-container matColumnDef="uri">
+                    <th mat-header-cell *matHeaderCellDef>URI</th>
+                    <td mat-cell *matCellDef="let element">
+                      <a [href]="element.uri" target="_blank" 
+                         class="uri-link">{{ element.uri }}</a>
+                    </td>
+                  </ng-container>
+                  
+                  <tr mat-header-row *matHeaderRowDef="['label', 'uri']"></tr>
+                  <tr mat-row *matRowDef="let row; columns: ['label', 'uri'];"></tr>
                 </table>
               </div>
               
+              <!-- Client-side paginator -->
               <mat-paginator 
+                *ngIf="!isServerSideDataSource(tab)"
                 [pageSizeOptions]="[5, 10, 20, 50]" 
+                showFirstLastButtons>
+              </mat-paginator>
+              
+              <!-- Server-side paginator -->
+              <mat-paginator 
+                *ngIf="isServerSideDataSource(tab) && getServerDataSource(tab)"
+                [length]="(getServerDataSource(tab)!.pagination$ | async)?.totalItems || 0"
+                [pageSize]="(getServerDataSource(tab)!.pagination$ | async)?.pageSize || 50"
+                [pageIndex]="((getServerDataSource(tab)!.pagination$ | async)?.page || 1) - 1"
+                [pageSizeOptions]="[25, 50, 100, 250]"
+                (page)="onPageChange($event, tab)"
                 showFirstLastButtons>
               </mat-paginator>
             </div>
@@ -175,14 +253,10 @@ export interface TabInfo {
         </mat-tab-group>
       </mat-card-content>
       
-      <mat-card-actions>
+      <mat-card-actions *ngIf="!hideActions">
         <button mat-raised-button color="primary" (click)="newUpload()">
           <mat-icon>add</mat-icon>
           New Upload
-        </button>
-        <button mat-button (click)="exportResults()">
-          <mat-icon>download</mat-icon>
-          Export Results
         </button>
       </mat-card-actions>
     </mat-card>
@@ -194,6 +268,15 @@ export interface TabInfo {
     
     .results-tabs {
       min-height: 400px;
+    }
+    
+    .results-tabs ::ng-deep .mat-mdc-tab-header {
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    
+    .results-tabs ::ng-deep .mat-mdc-tab-label-container {
+      overflow: visible;
     }
     
     .summary-content {
@@ -220,6 +303,30 @@ export interface TabInfo {
     
     .content-text {
       margin-top: 20px;
+    }
+    
+    .classes-overview {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #e0e0e0;
+    }
+    
+    .classes-overview h4 {
+      margin-bottom: 10px;
+      color: #1976d2;
+    }
+    
+    .classes-table {
+      width: 100%;
+      margin-top: 15px;
+    }
+    
+    .clickable-row {
+      cursor: pointer;
+    }
+    
+    .clickable-row:hover {
+      background-color: #f5f5f5;
     }
     
     .table-content {
@@ -294,19 +401,69 @@ export interface TabInfo {
     }
   `]
 })
-export class ResultsComponent implements OnInit {
+export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
   @Input() results: TabInfo[] = [];
+  @Input() hideActions = false;
   @Output() newUploadRequested = new EventEmitter<void>();
   
   tabs: TabInfo[] = [];
   dataSources = new Map<string, MatTableDataSource<any>>();
+  serverDataSources = new Map<string, ServerSideDataSource>();
   displayedColumns = new Map<string, string[]>();
-  columnFilters = new Map<string, any>();
+  filterControls = new Map<string, FormControl>();
+  currentFilters = new Map<string, string>();
   
-  @ViewChild(MatPaginator) paginator!: MatPaginator;
-  @ViewChild(MatSort) sort!: MatSort;
+  @ViewChildren(MatPaginator) paginators!: QueryList<MatPaginator>;
+  @ViewChildren(MatSort) sorts!: QueryList<MatSort>;
+
+  constructor(
+    private serverSideDataSourceService: ServerSideDataSourceService,
+    private http: HttpClient
+  ) {}
+
+  ngAfterViewInit() {
+    // Connect paginators and sorts to data sources after view initialization
+    this.connectPaginatorsAndSorts();
+  }
+
+  connectPaginatorsAndSorts() {
+    if (this.paginators && this.sorts) {
+      let paginatorIndex = 0;
+      let sortIndex = 0;
+      
+      this.tabs.forEach(tab => {
+        if (tab.type === 'table' && tab.data) {
+          const dataSource = this.dataSources.get(tab.label);
+          if (dataSource) {
+            const paginator = this.paginators.toArray()[paginatorIndex];
+            const sort = this.sorts.toArray()[sortIndex];
+            
+            if (paginator) {
+              dataSource.paginator = paginator;
+              paginatorIndex++;
+            }
+            
+            if (sort) {
+              dataSource.sort = sort;
+              sortIndex++;
+            }
+          }
+        }
+      });
+    }
+  }
 
   ngOnInit() {
+    this.updateTabs();
+  }
+
+  ngOnChanges(changes: SimpleChanges) {
+    if (changes['results']) {
+      this.updateTabs();
+    }
+  }
+
+  updateTabs() {
     this.tabs = this.results || [];
     this.initializeDataSources();
   }
@@ -318,66 +475,146 @@ export class ResultsComponent implements OnInit {
   initializeDataSources() {
     this.tabs.forEach(tab => {
       if (tab.type === 'table' && tab.data) {
-        const dataSource = new MatTableDataSource(tab.data);
-        this.dataSources.set(tab.label, dataSource);
+        // For all table tabs, enforce Label and URI columns only
+        this.displayedColumns.set(tab.label, ['label', 'uri']);
         
-        // Set up columns
-        if (tab.data.length > 0) {
-          const columns = Object.keys(tab.data[0]);
-          this.displayedColumns.set(tab.label, columns);
+        // Check if this tab should use server-side pagination
+        if (this.shouldUseServerSidePagination(tab)) {
+          this.setupServerSideDataSource(tab);
+        } else {
+          this.setupClientSideDataSource(tab);
         }
         
-        // Set up custom filter
-        dataSource.filterPredicate = (data: any, filter: string) => {
-          const filters = JSON.parse(filter || '{}');
-          return Object.keys(filters).every(key => {
-            const value = data[key];
-            const filterValue = filters[key];
-            if (!filterValue) return true;
-            return value && value.toString().toLowerCase().includes(filterValue.toLowerCase());
-          });
-        };
+        // Setup filter control for this tab
+        const filterControl = new FormControl('');
+        this.filterControls.set(tab.label, filterControl);
+        
+        // Setup filter debouncing
+        filterControl.valueChanges.pipe(
+          debounceTime(300),
+          distinctUntilChanged()
+        ).subscribe(filterValue => {
+          this.applyFilter(filterValue || '', tab);
+        });
       }
     });
+    
+    // Re-connect paginators and sorts if they're already available
+    setTimeout(() => this.connectPaginatorsAndSorts(), 0);
   }
 
-  getDataSource(tab: TabInfo): MatTableDataSource<any> {
-    return this.dataSources.get(tab.label) || new MatTableDataSource([]);
+  shouldUseServerSidePagination(tab: TabInfo): boolean {
+    // Use server-side pagination if:
+    // 1. The tab has uploadInfo with classUri (indicating it's a class instance table)
+    // 2. OR the data array has more than 100 items (arbitrary threshold)
+    const hasClassUri = !!(tab.uploadInfo && tab.uploadInfo.classUri);
+    const hasLargeDataset = !!(tab.data && tab.data.length > 100);
+    return hasClassUri || hasLargeDataset;
+  }
+
+  setupServerSideDataSource(tab: TabInfo) {
+    const serverDataSource = this.serverSideDataSourceService.createDataSource();
+    this.serverDataSources.set(tab.label, serverDataSource);
+    
+    // Load initial data if we have the necessary information
+    if (tab.uploadInfo?.graphName && tab.uploadInfo?.classUri) {
+      serverDataSource.loadData(tab.uploadInfo.graphName, tab.uploadInfo.classUri, 1, 50, '');
+    }
+  }
+
+  setupClientSideDataSource(tab: TabInfo) {
+    const dataSource = new MatTableDataSource(tab.data);
+    this.dataSources.set(tab.label, dataSource);
+    
+    // Set up filter predicate for label field only
+    dataSource.filterPredicate = (data: any, filter: string) => {
+      const filterValue = filter.toLowerCase();
+      return data.label && data.label.toString().toLowerCase().includes(filterValue);
+    };
+  }
+
+  getDataSource(tab: TabInfo): MatTableDataSource<any> | ServerSideDataSource {
+    // Return server-side data source if available, otherwise client-side
+    return this.serverDataSources.get(tab.label) || 
+           this.dataSources.get(tab.label) || 
+           new MatTableDataSource<any>([]);
+  }
+
+  isServerSideDataSource(tab: TabInfo): boolean {
+    return this.serverDataSources.has(tab.label);
+  }
+
+  getClientDataSource(tab: TabInfo): MatTableDataSource<any> {
+    return this.dataSources.get(tab.label) || new MatTableDataSource<any>([]);
+  }
+
+  getServerDataSource(tab: TabInfo): ServerSideDataSource | null {
+    return this.serverDataSources.get(tab.label) || null;
   }
 
   getDisplayedColumns(tab: TabInfo): string[] {
-    return this.displayedColumns.get(tab.label) || [];
+    // Always return label and uri for table tabs
+    return ['label', 'uri'];
   }
 
   getColumnLabel(column: string): string {
-    // Convert camelCase to readable format
+    if (column === 'label') return 'Label';
+    if (column === 'uri') return 'URI';
     return column.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
   }
 
-  applyFilter(event: Event, tab: TabInfo) {
-    const filterValue = (event.target as HTMLInputElement).value;
-    const dataSource = this.dataSources.get(tab.label);
-    if (dataSource) {
-      // Simple global filter
-      dataSource.filter = filterValue.trim().toLowerCase();
+  applyFilter(filterValue: string, tab: TabInfo) {
+    this.currentFilters.set(tab.label, filterValue);
+    
+    if (this.isServerSideDataSource(tab)) {
+      // Server-side filtering
+      const serverDataSource = this.getServerDataSource(tab);
+      if (serverDataSource && tab.uploadInfo?.graphName && tab.uploadInfo?.classUri) {
+        serverDataSource.loadData(
+          tab.uploadInfo.graphName,
+          tab.uploadInfo.classUri,
+          1, // Reset to first page
+          50, // Default page size
+          filterValue
+        );
+      }
+    } else {
+      // Client-side filtering
+      const clientDataSource = this.getClientDataSource(tab);
+      if (clientDataSource) {
+        clientDataSource.filter = filterValue.trim().toLowerCase();
+      }
     }
   }
 
-  applyColumnFilter(filterValue: string, column: string, tab: TabInfo) {
-    const filters = this.columnFilters.get(tab.label) || {};
-    
-    if (column === 'label') {
-      filters.label = filterValue;
-    } else if (column === 'uri') {
-      filters.uri = filterValue;
+  onPageChange(event: PageEvent, tab: TabInfo) {
+    if (this.isServerSideDataSource(tab)) {
+      const serverDataSource = this.getServerDataSource(tab);
+      const currentFilter = this.currentFilters.get(tab.label) || '';
+      
+      if (serverDataSource && tab.uploadInfo?.graphName && tab.uploadInfo?.classUri) {
+        serverDataSource.loadData(
+          tab.uploadInfo.graphName,
+          tab.uploadInfo.classUri,
+          event.pageIndex + 1, // Convert to 1-based page number
+          event.pageSize,
+          currentFilter
+        );
+      }
     }
-    
-    this.columnFilters.set(tab.label, filters);
-    
-    const dataSource = this.dataSources.get(tab.label);
-    if (dataSource) {
-      dataSource.filter = JSON.stringify(filters);
-    }
+    // Client-side pagination is handled automatically by MatPaginator
+  }
+
+  getFilterControl(tab: TabInfo): FormControl {
+    return this.filterControls.get(tab.label) || new FormControl('');
+  }
+
+  getClassesDataSource(classesData: any[]): MatTableDataSource<any> {
+    return new MatTableDataSource(classesData);
+  }
+
+  getTotalEntities(classesData: any[]): number {
+    return classesData.reduce((total, cls) => total + (cls.instanceCount || 0), 0);
   }
 
   getSparqlQueryUrl(uploadInfo: any): string {
@@ -400,23 +637,5 @@ LIMIT 1000`;
 
   newUpload() {
     this.newUploadRequested.emit();
-  }
-
-  exportResults() {
-    // Create a downloadable JSON file with all results
-    const exportData = {
-      timestamp: new Date().toISOString(),
-      tabs: this.tabs
-    };
-    
-    const dataStr = JSON.stringify(exportData, null, 2);
-    const dataBlob = new Blob([dataStr], {type: 'application/json'});
-    
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(dataBlob);
-    link.download = `kg-analysis-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   }
 }

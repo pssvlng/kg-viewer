@@ -1,11 +1,12 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from rdflib import Graph, RDF, RDFS
+from rdflib import Graph, RDF, RDFS, URIRef
 import os
 import json
 import uuid
 import threading
 import time
+import math
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import Dict, Optional, List
@@ -13,6 +14,7 @@ import requests
 from requests.auth import HTTPDigestAuth
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from urllib.parse import quote
 from virtuoso import storeDataToGraph, storeDataToGraphInBatches, query_sparql
 from config import config
 
@@ -69,11 +71,6 @@ if os.path.exists(class_definitions_file):
         uri = class_info.get('uri')
         if uri:
             URI_TO_CLASS[uri] = class_info
-    
-    print(f"Loaded {len(CLASS_DEFINITIONS)} class definitions")
-    print(f"Created URI mapping for {len(URI_TO_CLASS)} classes")
-else:
-    print("Warning: class_definitions.json not found")
 
 # Job Management Functions
 def create_upload_job(filename: str, graph_name: str, total_triples: int) -> str:
@@ -401,8 +398,6 @@ def process_upload_async(job_id: str, graph: Graph, graph_name: str):
         def progress_callback(batch_num, processed_triples, total_triples):
             update_job_progress(job_id, batch_num, processed_triples)
         
-        print(f"Starting batch upload for job {job_id}")
-        
         # Upload data with progress tracking
         success = storeDataToGraphInBatches(
             graph_uri, 
@@ -415,165 +410,40 @@ def process_upload_async(job_id: str, graph: Graph, graph_name: str):
             fail_job(job_id, "Failed to upload data to Virtuoso")
             return
         
-        print(f"Upload completed for job {job_id}, analyzing data...")
-        
         # Analyze the uploaded data with progress tracking
         result_data = analyze_uploaded_data_optimized(graph, graph_name, graph_uri, sparql_endpoint, job_id)
         
         # Mark job as completed
         complete_job(job_id, result_data)
         
-        print(f"Job {job_id} completed successfully")
-        
     except Exception as e:
-        print(f"Error processing job {job_id}: {str(e)}")
         fail_job(job_id, str(e))
 
 def analyze_uploaded_data_optimized(graph, graph_name, graph_uri, sparql_endpoint, job_id):
-    """Analyze the uploaded TTL data efficiently for large files"""
-    tabs = []
-    total_triples = len(graph)
     
-    print(f"Starting optimized analysis for {total_triples} triples...")
+    update_analysis_progress(job_id, 20, "Starting analysis...")
     
-    # Create structured upload info for better formatting in frontend
-    upload_info = {
-        'status': 'Success',
-        'message': 'TTL file uploaded and stored successfully',
-        'graphName': graph_name or 'default',
-        'graphId': graph_name or 'default',
-        'graphUri': graph_uri,
-        'triplesCount': total_triples,
-        'sparqlEndpoint': sparql_endpoint
-    }
+    # Use the unified analysis function
+    analysis_data = create_graph_analysis_data(
+        graph_uri=graph_uri,
+        graph_name=graph_name,
+        graph=graph,
+        sparql_endpoint=sparql_endpoint
+    )
     
-    # Find all subjects that are instances of known classes
-    class_instances = {}
-    all_classes_found = set()
+    update_analysis_progress(job_id, 80, "Creating tabs...")
     
-    # Use RDFLib's efficient querying instead of iterating all triples
-    print("Extracting type assertions using chunked SPARQL queries...")
+    # Create tabs using the unified function
+    tabs = create_analysis_tabs(
+        analysis_data=analysis_data,
+        graph_name=graph_name,
+        graph_uri=graph_uri,
+        sparql_endpoint=sparql_endpoint
+    )
     
-    type_triples = []
+    update_analysis_progress(job_id, 100, "Analysis completed!")
     
-    try:
-        # Query for all type assertions
-        for subj, pred, obj in graph.triples((None, RDF.type, None)):
-            type_triples.append((str(subj), str(obj)))
-            all_classes_found.add(str(obj))
-        
-        print(f"Found {len(type_triples)} type assertions")
-        print(f"Found {len(all_classes_found)} distinct classes")
-        
-        update_analysis_progress(job_id, 40, "Analyzing class instances...")
-        
-        # Group instances by known classes
-        for subj_uri, class_uri in type_triples:
-            if class_uri in URI_TO_CLASS:
-                if class_uri not in class_instances:
-                    class_instances[class_uri] = []
-                class_instances[class_uri].append(subj_uri)
-        
-        print(f"Found {len(class_instances)} known classes with instances")
-        
-        update_analysis_progress(job_id, 80, "Preparing results...")
-        
-        # Prepare structured analysis data
-        class_analysis = []
-        for class_uri, instances in class_instances.items():
-            class_info = URI_TO_CLASS.get(class_uri, {})
-            class_label = class_info.get('label_en', class_info.get('display_label', class_uri.split('/')[-1]))
-            class_analysis.append({
-                'label': class_label,
-                'instanceCount': len(instances),
-                'uri': class_uri
-            })
-        
-        # Sort by instance count (descending)
-        class_analysis.sort(key=lambda x: x['instanceCount'], reverse=True)
-        
-        # Create analysis summary for upload info
-        upload_info['analysisResults'] = {
-            'totalTriples': total_triples,
-            'classDefinitionsLoaded': len(CLASS_DEFINITIONS),
-            'foundClassesCount': len(class_instances),
-            'classList': class_analysis[:20]  # Top 20 classes
-        }
-        
-        update_analysis_progress(job_id, 90, "Creating result tabs...")
-        
-        # Create Summary tab
-        summary_content = f"""Upload Summary:
-• Total Triples: {total_triples:,}
-• Graph URI: {graph_uri}
-• Classes Found: {len(all_classes_found)}
-• Known Classes: {len(class_instances)}
-• Class Definitions Loaded: {len(CLASS_DEFINITIONS)}
-
-Analysis completed successfully."""
-        
-        tabs.append({
-            'label': 'Summary',
-            'content': summary_content,
-            'type': 'summary',
-            'uploadInfo': upload_info
-        })
-        
-        # Create Classes Overview tab
-        if class_analysis:
-            tabs.append({
-                'label': 'Classes Overview',
-                'content': 'Overview of RDF classes found in the uploaded data',
-                'type': 'table',
-                'data': class_analysis,
-                'uploadInfo': upload_info
-            })
-        
-        # Create detailed tabs for each class with many instances
-        update_analysis_progress(job_id, 95, "Creating detailed class views...")
-        
-        for class_uri, instances in list(class_instances.items())[:10]:  # Top 10 classes
-            if len(instances) > 5:  # Only create tabs for classes with multiple instances
-                class_info = URI_TO_CLASS.get(class_uri, {})
-                class_label = class_info.get('label_en', class_info.get('display_label', class_uri.split('/')[-1]))
-                
-                # Get sample instances with their properties
-                sample_instances = instances[:100]  # Limit to first 100 instances
-                instance_data = []
-                
-                for instance_uri in sample_instances:
-                    instance_info = {'uri': instance_uri}
-                    
-                    # Get properties for this instance
-                    for pred, obj in graph.predicate_objects(subj=None):  # This should be the instance URI
-                        if str(pred) != str(RDF.type):
-                            pred_label = str(pred).split('/')[-1]
-                            instance_info[pred_label] = str(obj)
-                    
-                    instance_data.append(instance_info)
-                
-                tabs.append({
-                    'label': f'{class_label} ({len(instances)})',
-                    'content': f'Instances of {class_label}',
-                    'type': 'table',
-                    'data': instance_data,
-                    'uploadInfo': upload_info
-                })
-        
-        update_analysis_progress(job_id, 100, "Analysis completed")
-        
-        print(f"Analysis completed successfully with {len(tabs)} tabs")
-        return tabs
-        
-    except Exception as e:
-        print(f"Error during analysis: {e}")
-        # Return minimal result on error
-        return [{
-            'label': 'Summary',
-            'content': f'Upload completed with {total_triples} triples.\nAnalysis failed: {str(e)}',
-            'type': 'summary',
-            'uploadInfo': upload_info
-        }]
+    return tabs
 
 # Add analysis progress tracking
 analysis_progress = {}
@@ -589,6 +459,116 @@ def update_analysis_progress(job_id: str, progress: float, status: str):
 def get_analysis_progress(job_id: str):
     """Get analysis progress"""
     return analysis_progress.get(job_id, {})
+
+def create_analysis_tabs(analysis_data, graph_name, graph_uri, sparql_endpoint):
+    """Create analysis tabs structure - unified for both upload and graph analysis"""
+    tabs = []
+    
+    # Create upload info structure
+    upload_info = {
+        'status': 'Success',
+        'message': f'Graph analysis completed successfully',
+        'graphName': graph_name or 'default',
+        'graphId': graph_name or 'default',
+        'graphUri': graph_uri,
+        'triplesCount': analysis_data.get('totalTriples', 0),
+        'sparqlEndpoint': sparql_endpoint,
+        'analysisResults': analysis_data
+    }
+    
+    # Create Summary tab with integrated classes overview
+    summary_content = ""  # Remove redundant text summary
+    
+    # Add classes overview data to upload_info for summary display
+    upload_info['classesOverview'] = analysis_data.get('classList', [])
+    
+    tabs.append({
+        'label': 'Summary',
+        'content': summary_content,
+        'type': 'summary',
+        'uploadInfo': upload_info
+    })
+    
+    # Create detailed tabs for each class with instances
+    try:
+        for class_item in list(analysis_data.get('classList', []))[:10]:
+            if isinstance(class_item, dict) and class_item.get('instanceCount', 0) > 0:
+                class_uri = class_item.get('uri')
+                class_label = class_item.get('label', class_uri.split('/')[-1] if class_uri else 'Unknown')
+                instance_count = class_item.get('instanceCount', 0)
+                
+                # Always use SPARQL for consistency - both upload and analysis use same logic
+                instance_data = get_instance_data_from_sparql(class_uri, graph_uri)
+                    
+                if instance_data:
+                    # Create a copy of upload_info with class-specific information
+                    class_upload_info = upload_info.copy()
+                    class_upload_info['classUri'] = class_uri
+                    
+                    tabs.append({
+                        'label': f'{class_label} ({instance_count})',
+                        'content': f'Instances of {class_label}',
+                        'type': 'table',
+                        'data': instance_data,
+                        'uploadInfo': class_upload_info
+                    })
+                    
+    except Exception as e:
+        print(f"Error creating detailed class tabs: {e}")
+    
+    return tabs
+
+def get_instance_data_from_sparql(class_uri, graph_uri):
+    """Get instance data via SPARQL queries (graph analysis context)"""
+    try:
+        # Query for instances with their labels
+        instances_query = f"""
+        SELECT DISTINCT ?instance ?label
+        FROM <{graph_uri}>
+        WHERE {{
+          ?instance a <{class_uri}> .
+          OPTIONAL {{
+            ?instance ?labelPred ?label .
+            FILTER(?labelPred IN (<http://www.w3.org/2000/01/rdf-schema#label>, 
+                                 <http://xmlns.com/foaf/0.1/name>, 
+                                 <http://schema.org/name>))
+          }}
+        }}
+        LIMIT 20
+        """
+        
+        instances_result = query_sparql(instances_query)
+        if not instances_result:
+            return [{'label': 'No instances found', 'uri': ''}]
+            
+        instance_data = []
+        
+        for binding in instances_result[:20]:
+            instance_uri = binding['instance']['value']
+            
+            # Get label or create one from URI
+            label = None
+            if 'label' in binding and binding['label']:
+                label = binding['label']['value']
+            
+            if not label:
+                if '#' in instance_uri:
+                    label = instance_uri.split('#')[-1]
+                elif '/' in instance_uri:
+                    label = instance_uri.split('/')[-1]
+                else:
+                    label = instance_uri
+                    
+            instance_data.append({
+                'label': label,
+                'uri': instance_uri
+            })
+            
+        return instance_data
+        
+    except Exception as e:
+        print(f"Error getting instance data via SPARQL for {class_uri}: {e}")
+        return [{'label': 'Error', 'uri': 'No instance data available'}]
 
 @app.route('/upload_file', methods=['POST'])
 def upload_file():
@@ -615,7 +595,6 @@ def upload_file():
         graph.parse(data=ttl_content, format='turtle')
         
         total_triples = len(graph)
-        print(f"Received file: {file.filename} with {total_triples} triples for graph: {graph_name or 'default'}")
         
         # Create upload job
         job_id = create_upload_job(file.filename, graph_name, total_triples)
@@ -638,7 +617,6 @@ def upload_file():
         })
             
     except Exception as e:
-        print(f"Error starting upload job: {e}")
         return jsonify({"error": f"Failed to start upload: {str(e)}"}), 500
 
 @app.route('/api/graphs', methods=['GET'])
@@ -783,6 +761,336 @@ def delete_graph(graph_name):
         return jsonify({
             'success': False,
             'error': f'Failed to delete graph: {str(e)}'
+        }), 500
+
+def create_graph_analysis_data(graph_uri, graph_name=None, graph=None, sparql_endpoint=None):
+    """Create analysis data for a specific graph - reusable for both upload analysis and graph viewing"""
+    try:
+        analysis_results = {
+            'graphName': graph_name or graph_uri.split('/')[-1],
+            'graphUri': graph_uri,
+            'totalTriples': 0,
+            'foundClassesCount': 0,
+            'classList': [],
+            'predicatesList': [],
+            'lastUpdated': datetime.now().isoformat()
+        }
+
+        # If we have a graph object (from upload), analyze it directly
+        if graph:
+            return analyze_graph_object(graph, analysis_results)
+        
+        # Otherwise query the SPARQL endpoint
+        endpoint_url = sparql_endpoint or f"{config.virtuoso_url}/sparql"
+        return analyze_graph_via_sparql(graph_uri, endpoint_url, analysis_results)
+        
+    except Exception as e:
+        print(f"Error in create_graph_analysis_data: {e}")
+        return {
+            'error': str(e),
+            'graphName': graph_name or 'Unknown',
+            'graphUri': graph_uri
+        }
+
+def analyze_graph_object(graph, analysis_results):
+    """Analyze a graph object directly (for upload analysis)"""
+    total_triples = len(graph)
+    analysis_results['totalTriples'] = total_triples
+    
+    # Find all type assertions and classes
+    class_instances = {}
+    predicates_usage = {}
+    
+    # Extract type assertions - discover ALL classes in the data
+    for subj, pred, obj in graph.triples((None, RDF.type, None)):
+        class_uri = str(obj)
+        subj_uri = str(subj)
+        
+        # Add ALL classes found, not just those in predefined definitions
+        if class_uri not in class_instances:
+            class_instances[class_uri] = []
+        class_instances[class_uri].append(subj_uri)
+    
+    # Extract predicate usage
+    for subj, pred, obj in graph:
+        pred_uri = str(pred)
+        if pred_uri not in predicates_usage:
+            predicates_usage[pred_uri] = 0
+        predicates_usage[pred_uri] += 1
+    
+    # Prepare class analysis with dynamic class discovery
+    class_analysis = []
+    for class_uri, instances in class_instances.items():
+        # Create a readable label from the URI
+        class_label = class_uri.split('/')[-1] if '/' in class_uri else class_uri.split('#')[-1] if '#' in class_uri else class_uri
+        
+        class_analysis.append({
+            'label': class_label,
+            'instanceCount': len(instances),
+            'uri': class_uri
+        })
+    
+    class_analysis.sort(key=lambda x: x['instanceCount'], reverse=True)
+    
+    # Prepare predicate analysis
+    predicates_analysis = []
+    for pred_uri, count in sorted(predicates_usage.items(), key=lambda x: x[1], reverse=True)[:50]:
+        predicates_analysis.append({
+            'label': pred_uri.split('/')[-1] if '/' in pred_uri else pred_uri.split('#')[-1] if '#' in pred_uri else pred_uri,
+            'usage': count,
+            'uri': pred_uri
+        })
+    
+    analysis_results.update({
+        'foundClassesCount': len(class_instances),
+        'classList': class_analysis,
+        'predicatesList': predicates_analysis
+    })
+    
+    return analysis_results
+
+def analyze_graph_via_sparql(graph_uri, sparql_endpoint, analysis_results):
+    """Analyze a graph via SPARQL queries (for viewing existing graphs)"""
+    try:
+        # Count total triples in graph
+        count_query = f"""
+        SELECT (COUNT(*) as ?count)
+        FROM <{graph_uri}>
+        WHERE {{ ?s ?p ?o }}
+        """
+        
+        count_result = query_sparql(count_query)
+        if count_result and len(count_result) > 0:
+            analysis_results['totalTriples'] = int(count_result[0]['count']['value'])
+        
+        # Get ALL distinct classes and their instance counts (no filtering)
+        classes_query = f"""
+        SELECT ?class (COUNT(?instance) as ?count)
+        FROM <{graph_uri}>
+        WHERE {{
+          ?instance a ?class
+        }}
+        GROUP BY ?class
+        ORDER BY DESC(?count)
+        LIMIT 100
+        """
+        
+        classes_result = query_sparql(classes_query)
+        if classes_result and len(classes_result) > 0:
+            class_analysis = []
+            for binding in classes_result:
+                class_uri = binding['class']['value']
+                instance_count = int(binding['count']['value'])
+                
+                # Create readable label from URI
+                class_label = class_uri.split('/')[-1] if '/' in class_uri else class_uri.split('#')[-1] if '#' in class_uri else class_uri
+                
+                class_analysis.append({
+                    'label': class_label,
+                    'instanceCount': instance_count,
+                    'uri': class_uri
+                })
+            
+            analysis_results['classList'] = class_analysis
+            analysis_results['foundClassesCount'] = len(class_analysis)
+        
+        # Get distinct predicates and their usage counts
+        predicates_query = f"""
+        SELECT ?predicate (COUNT(*) as ?count)
+        FROM <{graph_uri}>  
+        WHERE {{
+          ?s ?predicate ?o
+          FILTER(?predicate != <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>)
+        }}
+        GROUP BY ?predicate
+        ORDER BY DESC(?count)
+        LIMIT 50
+        """
+        
+        predicates_result = query_sparql(predicates_query)
+        if predicates_result and len(predicates_result) > 0:
+            predicates_analysis = []
+            for binding in predicates_result:
+                pred_uri = binding['predicate']['value']
+                usage_count = int(binding['count']['value'])
+                
+                pred_label = pred_uri.split('/')[-1] if '/' in pred_uri else pred_uri.split('#')[-1] if '#' in pred_uri else pred_uri
+                
+                predicates_analysis.append({
+                    'label': pred_label,
+                    'usage': usage_count,
+                    'uri': pred_uri
+                })
+            
+            analysis_results['predicatesList'] = predicates_analysis
+            
+        return analysis_results
+        
+    except Exception as e:
+        print(f"Error in SPARQL analysis: {e}")
+        analysis_results['error'] = str(e)
+        return analysis_results
+
+@app.route('/api/graphs/<graph_name>/analysis', methods=['GET'])
+def get_graph_analysis(graph_name):
+    """Get analysis for a specific named graph"""
+    try:
+        graph_uri = config.get_graph_uri(graph_name)
+        sparql_endpoint = f"{config.virtuoso_url}/sparql"
+        
+        # Use the unified analysis function
+        analysis_data = create_graph_analysis_data(
+            graph_uri=graph_uri,
+            graph_name=graph_name,
+            sparql_endpoint=sparql_endpoint
+        )
+        
+        # Create tabs using the unified function
+        tabs = create_analysis_tabs(
+            analysis_data=analysis_data,
+            graph_name=graph_name,
+            graph_uri=graph_uri,
+            sparql_endpoint=sparql_endpoint
+        )
+        
+        return jsonify({
+            'success': True,
+            'graphName': graph_name,
+            'graphUri': graph_uri,
+            'tabs': tabs,
+            'analysis': analysis_data
+        })
+        
+    except Exception as e:
+        print(f"Error analyzing graph {graph_name}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/graphs/<graph_name>/class/<path:class_uri>/instances', methods=['GET'])
+def get_class_instances_paginated(graph_name, class_uri):
+    """Get paginated instances for a specific class with filtering support"""
+    try:
+        # Get query parameters
+        page = request.args.get('page', 1, type=int)
+        page_size = request.args.get('pageSize', 50, type=int)
+        filter_text = request.args.get('filter', '', type=str)
+        
+        # Validate parameters
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 1000:  # Limit max page size
+            page_size = 50
+            
+        # Calculate OFFSET for SPARQL
+        offset = (page - 1) * page_size
+        
+        graph_uri = config.get_graph_uri(graph_name)
+        
+        # Build filter condition for SPARQL
+        filter_condition = ""
+        if filter_text.strip():
+            escaped_filter = filter_text.replace("'", "\\'").replace("\\", "\\\\")
+            filter_condition = f"""
+            FILTER(
+                CONTAINS(LCASE(COALESCE(?label, "")), LCASE('{escaped_filter}')) ||
+                CONTAINS(LCASE(STR(?instance)), LCASE('{escaped_filter}'))
+            )
+            """
+        
+        # Query with pagination and filtering
+        instances_query = f"""
+        SELECT DISTINCT ?instance ?label
+        FROM <{graph_uri}>
+        WHERE {{
+          ?instance a <{class_uri}> .
+          OPTIONAL {{
+            ?instance ?labelPred ?label .
+            FILTER(?labelPred IN (<http://www.w3.org/2000/01/rdf-schema#label>, 
+                                 <http://xmlns.com/foaf/0.1/name>, 
+                                 <http://schema.org/name>))
+          }}
+          {filter_condition}
+        }}
+        ORDER BY COALESCE(?label, STR(?instance)) ?instance
+        LIMIT {page_size}
+        OFFSET {offset}
+        """
+        
+        # Get total count for pagination
+        count_query = f"""
+        SELECT (COUNT(DISTINCT ?instance) as ?count)
+        FROM <{graph_uri}>
+        WHERE {{
+          ?instance a <{class_uri}> .
+          OPTIONAL {{
+            ?instance ?labelPred ?label .
+            FILTER(?labelPred IN (<http://www.w3.org/2000/01/rdf-schema#label>, 
+                                 <http://xmlns.com/foaf/0.1/name>, 
+                                 <http://schema.org/name>))
+          }}
+          {filter_condition}
+        }}
+        """
+        
+        # Execute queries
+        instances_result = query_sparql(instances_query)
+        count_result = query_sparql(count_query)
+        
+        # Process count
+        total_count = 0
+        if count_result and len(count_result) > 0:
+            total_count = int(count_result[0]['count']['value'])
+        
+        # Process instances
+        instance_data = []
+        if instances_result:
+            for binding in instances_result:
+                instance_uri = binding['instance']['value']
+                
+                # Get label or create one from URI
+                label = None
+                if 'label' in binding and binding['label']:
+                    label = binding['label']['value']
+                
+                if not label:
+                    if '#' in instance_uri:
+                        label = instance_uri.split('#')[-1]
+                    elif '/' in instance_uri:
+                        label = instance_uri.split('/')[-1]
+                    else:
+                        label = instance_uri
+                        
+                instance_data.append({
+                    'label': label,
+                    'uri': instance_uri
+                })
+        
+        # Calculate pagination metadata
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        has_next = page < total_pages
+        has_previous = page > 1
+        
+        return jsonify({
+            'success': True,
+            'data': instance_data,
+            'pagination': {
+                'page': page,
+                'pageSize': page_size,
+                'totalItems': total_count,
+                'totalPages': total_pages,
+                'hasNext': has_next,
+                'hasPrevious': has_previous
+            },
+            'filter': filter_text
+        })
+        
+    except Exception as e:
+        print(f"Error getting paginated instances for class {class_uri} in graph {graph_name}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
 if __name__ == '__main__':

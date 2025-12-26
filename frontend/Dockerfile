@@ -1,4 +1,16 @@
-FROM nginx:alpine
+# Multi-stage build for Angular application
+FROM node:18-alpine as build
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Install dependencies
+RUN npm install
+
+# Copy source code
+COPY . .
 
 # Build arguments for configuration
 ARG BUILD_TIME
@@ -9,16 +21,14 @@ ARG GRAPH_BASE_URI=http://example.org/graph
 
 ENV BUILD_TIME=${BUILD_TIME}
 
-# Copy static files
-COPY src/index.html /usr/share/nginx/html/
-COPY src/app.js /usr/share/nginx/html/
-COPY src/config.js /usr/share/nginx/html/
+# Build the Angular application
+RUN npm run build
 
-# Inject build-time configuration
-RUN sed -i "s|API_BASE_URL: 'http://localhost:5000'|API_BASE_URL: '${API_BASE_URL}'|g" /usr/share/nginx/html/config.js && \
-    sed -i "s|LODVIEW_URL: 'http://localhost:8080'|LODVIEW_URL: '${LODVIEW_URL}'|g" /usr/share/nginx/html/config.js && \
-    sed -i "s|VIRTUOSO_URL: 'http://localhost:8890'|VIRTUOSO_URL: '${VIRTUOSO_URL}'|g" /usr/share/nginx/html/config.js && \
-    sed -i "s|GRAPH_BASE_URI: 'http://example.org/graph'|GRAPH_BASE_URI: '${GRAPH_BASE_URI}'|g" /usr/share/nginx/html/config.js
+# Production stage
+FROM nginx:alpine
+
+# Copy built Angular app
+COPY --from=build /app/dist/kg-viewer-frontend /usr/share/nginx/html
 
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf

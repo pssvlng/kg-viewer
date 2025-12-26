@@ -37,7 +37,6 @@ import { DocumentService } from '../../services/document.service';
             <input matInput 
                    [(ngModel)]="graphName" 
                    placeholder="Enter graph name or leave empty for default">
-            <mat-hint>If empty, data will be stored in the default graph</mat-hint>
           </mat-form-field>
         </div>
         
@@ -174,7 +173,7 @@ export class DocumentUploaderComponent {
               duration: 3000
             });
           } else {
-            // Legacy direct response flow
+            // Handle upload response and start monitoring
             this.documentProcessed.emit(result);
             this.snackBar.open('File uploaded and processed successfully!', 'Close', {
               duration: 3000

@@ -81,14 +81,14 @@ import { DocumentService, UploadJob } from '../../services/document.service';
         </div>
         
         <div class="analysis-details" *ngIf="job?.analysisProgress">
-          <div class="analysis-status" *ngIf="job.analysisProgress">
-            {{ job.analysisProgress.status }}
+          <div class="analysis-status" *ngIf="job?.analysisProgress">
+            {{ job?.analysisProgress?.status }}
           </div>
         </div>
         
         <div class="error-message" *ngIf="job?.status === 'failed'">
           <mat-icon>error</mat-icon>
-          <span>{{ job.error_message }}</span>
+          <span>{{ job?.error_message }}</span>
         </div>
         
         <div class="success-message" *ngIf="job?.status === 'success'">
