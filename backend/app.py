@@ -821,8 +821,15 @@ def analyze_graph_object(graph, analysis_results):
     # Prepare class analysis with dynamic class discovery
     class_analysis = []
     for class_uri, instances in class_instances.items():
-        # Create a readable label from the URI
-        class_label = class_uri.split('/')[-1] if '/' in class_uri else class_uri.split('#')[-1] if '#' in class_uri else class_uri
+        # Try to get rdfs:label for the class from the graph
+        class_label = None
+        for subj, pred, obj in graph.triples((URIRef(class_uri), RDFS.label, None)):
+            class_label = str(obj)
+            break
+        
+        # If no rdfs:label found, create a readable label from the URI
+        if not class_label:
+            class_label = class_uri.split('/')[-1] if '/' in class_uri else class_uri.split('#')[-1] if '#' in class_uri else class_uri
         
         class_analysis.append({
             'label': class_label,
@@ -863,14 +870,15 @@ def analyze_graph_via_sparql(graph_uri, sparql_endpoint, analysis_results):
         if count_result and len(count_result) > 0:
             analysis_results['totalTriples'] = int(count_result[0]['count']['value'])
         
-        # Get ALL distinct classes and their instance counts (no filtering)
+        # Get ALL distinct classes and their instance counts with labels
         classes_query = f"""
-        SELECT ?class (COUNT(?instance) as ?count)
+        SELECT ?class (COUNT(?instance) as ?count) ?classLabel
         FROM <{graph_uri}>
         WHERE {{
           ?instance a ?class
+          OPTIONAL {{ ?class <http://www.w3.org/2000/01/rdf-schema#label> ?classLabel }}
         }}
-        GROUP BY ?class
+        GROUP BY ?class ?classLabel
         ORDER BY DESC(?count)
         LIMIT 100
         """
@@ -882,8 +890,11 @@ def analyze_graph_via_sparql(graph_uri, sparql_endpoint, analysis_results):
                 class_uri = binding['class']['value']
                 instance_count = int(binding['count']['value'])
                 
-                # Create readable label from URI
-                class_label = class_uri.split('/')[-1] if '/' in class_uri else class_uri.split('#')[-1] if '#' in class_uri else class_uri
+                # Use rdfs:label if available, otherwise create readable label from URI
+                if 'classLabel' in binding and binding['classLabel']:
+                    class_label = binding['classLabel']['value']
+                else:
+                    class_label = class_uri.split('/')[-1] if '/' in class_uri else class_uri.split('#')[-1] if '#' in class_uri else class_uri
                 
                 class_analysis.append({
                     'label': class_label,

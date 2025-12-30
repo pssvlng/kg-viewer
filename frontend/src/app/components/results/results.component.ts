@@ -14,6 +14,9 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { ServerSideDataSource, ServerSideDataSourceService } from '../../services/server-side-data-source.service';
+import { DocumentService } from '../../services/document.service';
+import { environment } from '../../../environments/environment';
+import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
 
 export interface UploadInfo {
   status: string;
@@ -109,7 +112,7 @@ export interface TabInfo {
                 
                 <div class="result-item">
                   <strong>SPARQL Endpoint:</strong> 
-                  <a [href]="getSparqlQueryUrl(tab.uploadInfo)" target="_blank">{{ tab.uploadInfo?.sparqlEndpoint }}</a>
+                  <a [href]="getSparqlQueryUrl(tab.uploadInfo)" target="_blank">{{ getPublicSparqlEndpoint(tab.uploadInfo?.sparqlEndpoint) }}</a>
                 </div>
                 
               </div>
@@ -414,10 +417,12 @@ export interface TabInfo {
     }
   `]
 })
-export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
+export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, ContentNavigable {
   @Input() results: TabInfo[] = [];
   @Input() hideActions = false;
+  @Input() isInContainer = false; // New flag to detect container usage
   @Output() newUploadRequested = new EventEmitter<void>();
+  @Output() contentNavigation = new EventEmitter<ContentNavigationEvent>();
   
   tabs: TabInfo[] = [];
   dataSources = new Map<string, MatTableDataSource<any>>();
@@ -425,6 +430,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
   displayedColumns = new Map<string, string[]>();
   filterControls = new Map<string, FormControl>();
   currentFilters = new Map<string, string>();
+  configuredSparqlEndpoint = 'http://localhost:8890/sparql'; // fallback
   
   @ViewChildren(MatPaginator) paginators!: QueryList<MatPaginator>;
   @ViewChildren(MatSort) sorts!: QueryList<MatSort>;
@@ -432,7 +438,8 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
 
   constructor(
     private serverSideDataSourceService: ServerSideDataSourceService,
-    private http: HttpClient
+    private http: HttpClient,
+    private documentService: DocumentService
   ) {}
 
   ngAfterViewInit() {
@@ -468,7 +475,29 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
   }
 
   ngOnInit() {
+    this.loadConfiguration();
     this.updateTabs();
+  }
+
+  async loadConfiguration() {
+    try {
+      // Get configuration from the backend
+      const response = await this.http.get<any>(`${environment.apiUrl}/api/config`).toPromise();
+      const config = response?.config;
+      
+      // Use external_virtuoso_url if available, otherwise fall back to localhost
+      if (config?.external_virtuoso_url) {
+        this.configuredSparqlEndpoint = `${config.external_virtuoso_url}/sparql`;
+      } else if (config?.virtuoso_url) {
+        // Convert internal URL to external URL
+        this.configuredSparqlEndpoint = config.virtuoso_url.replace('http://virtuoso:8890', 'http://localhost:8890') + '/sparql';
+      } else {
+        this.configuredSparqlEndpoint = 'http://localhost:8890/sparql';
+      }
+    } catch (error) {
+      console.warn('Failed to fetch configuration, using fallback SPARQL endpoint:', error);
+      this.configuredSparqlEndpoint = 'http://localhost:8890/sparql';
+    }
   }
 
   ngOnChanges(changes: SimpleChanges) {
@@ -478,8 +507,17 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
   }
 
   updateTabs() {
-    this.tabs = this.results || [];
+    this.tabs = this.sortTabs(this.results || []);
     this.initializeDataSources();
+  }
+
+  private sortTabs(tabs: TabInfo[]): TabInfo[] {
+    // Separate tabs into two groups: owl# tabs and others
+    const owlTabs = tabs.filter(tab => tab.label.startsWith('owl#'));
+    const otherTabs = tabs.filter(tab => !tab.label.startsWith('owl#'));
+    
+    // Return other tabs first, then owl# tabs
+    return [...otherTabs, ...owlTabs];
   }
 
   trackByFn(index: number, item: TabInfo): string {
@@ -629,16 +667,36 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit {
   }
 
   getClassesDataSource(classesData: any[]): MatTableDataSource<any> {
-    return new MatTableDataSource(classesData);
+    const sortedClasses = this.sortEntityTypes(classesData);
+    return new MatTableDataSource(sortedClasses);
+  }
+
+  private sortEntityTypes(entityTypes: any[]): any[] {
+    // Separate entity types into two groups: owl# types and others
+    const owlTypes = entityTypes.filter(entityType => entityType.label && entityType.label.startsWith('owl#'));
+    const otherTypes = entityTypes.filter(entityType => !entityType.label || !entityType.label.startsWith('owl#'));
+    
+    // Return other types first, then owl# types
+    return [...otherTypes, ...owlTypes];
   }
 
   getTotalEntities(classesData: any[]): number {
     return classesData.reduce((total, cls) => total + (cls.instanceCount || 0), 0);
   }
 
+  getPublicSparqlEndpoint(sparqlEndpoint: string | undefined): string {
+    // Use the configured endpoint instead of the one from uploadInfo
+    // The uploadInfo might contain internal docker URLs
+    return this.configuredSparqlEndpoint;
+  }
+
+  async getConfiguredSparqlEndpoint(): Promise<string> {
+    return this.configuredSparqlEndpoint;
+  }
+
   getSparqlQueryUrl(uploadInfo: any): string {
     if (!uploadInfo?.graphId) {
-      return uploadInfo?.sparqlEndpoint || '';
+      return this.configuredSparqlEndpoint;
     }
 
     const graphName = uploadInfo.graphId;
@@ -651,7 +709,7 @@ where {
 LIMIT 1000`;
     
     const encodedQuery = encodeURIComponent(sparqlQuery);
-    return `${uploadInfo.sparqlEndpoint}?query=${encodedQuery}`;
+    return `${this.configuredSparqlEndpoint}?qtxt=${encodedQuery}`;
   }
 
   navigateToEntityTab(entityLabel: string, instanceCount: number) {

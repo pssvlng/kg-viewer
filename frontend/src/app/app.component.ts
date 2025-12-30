@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -6,6 +6,8 @@ import { DocumentUploaderComponent } from './components/document-uploader/docume
 import { UploadProgressComponent } from './components/upload-progress/upload-progress.component';
 import { ResultsComponent, TabInfo } from './components/results/results.component';
 import { GraphsViewerComponent } from './components/graphs-viewer/graphs-viewer.component';
+import { ContentContainerComponent } from './components/content-container/content-container.component';
+import { ContentContainerService } from './services/content-container.service';
 
 @Component({
   selector: 'app-root',
@@ -17,7 +19,8 @@ import { GraphsViewerComponent } from './components/graphs-viewer/graphs-viewer.
     DocumentUploaderComponent,
     UploadProgressComponent,
     ResultsComponent,
-    GraphsViewerComponent
+    GraphsViewerComponent,
+    ContentContainerComponent
   ],
   template: `
     <mat-toolbar color="primary">
@@ -56,7 +59,9 @@ import { GraphsViewerComponent } from './components/graphs-viewer/graphs-viewer.
         <!-- Graphs Tab -->
         <mat-tab label="Named Graphs">
           <div class="tab-content">
-            <app-graphs-viewer></app-graphs-viewer>
+            <app-content-container 
+              containerId="named-graphs">
+            </app-content-container>
           </div>
         </mat-tab>
         
@@ -83,11 +88,31 @@ import { GraphsViewerComponent } from './components/graphs-viewer/graphs-viewer.
     }
   `]
 })
-export class AppComponent {
+export class AppComponent implements OnInit {
   results: any = null;
   currentJobId: string | null = null;
   selectedTabIndex = 0;
   isUploading = false;
+
+  constructor(private contentContainerService: ContentContainerService) {}
+
+  ngOnInit() {
+    // Initialize the named graphs container with the graphs viewer
+    this.initializeNamedGraphsContainer();
+  }
+
+  private initializeNamedGraphsContainer() {
+    // Push graphs viewer as the root component in named graphs container
+    setTimeout(() => {
+      this.contentContainerService.pushContent('named-graphs', {
+        component: GraphsViewerComponent,
+        data: { 
+          useContainerNavigation: true // Enable container navigation mode
+        },
+        title: 'Named Graphs'
+      });
+    });
+  }
 
   onUploadStarted(jobInfo: { jobId: string, filename: string }) {
     this.currentJobId = jobInfo.jobId;

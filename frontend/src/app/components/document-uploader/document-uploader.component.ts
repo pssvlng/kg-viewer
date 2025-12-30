@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -130,6 +130,7 @@ export class DocumentUploaderComponent {
   @Output() documentProcessed = new EventEmitter<any>();
   @Output() uploadStarted = new EventEmitter<{jobId: string, filename: string}>();
   @Output() newUploadStarted = new EventEmitter<void>();
+  @ViewChild('fileInput') fileInput!: ElementRef<HTMLInputElement>;
   
   selectedFile: File | null = null;
   graphName: string = '';
@@ -168,8 +169,8 @@ export class DocumentUploaderComponent {
       this.snackBar.open('Please select a valid TTL file', 'Close', {
         duration: 3000
       });
-      // Reset the file input
-      event.target.value = '';
+      // Reset the file input using our helper method
+      this.resetFileInput();
     }
   }
 
@@ -204,7 +205,7 @@ export class DocumentUploaderComponent {
           }
           
           // Reset for next upload
-          this.selectedFile = null;
+          this.resetFileInput();
         },
         error: (error) => {
           this.isProcessing = false;
@@ -212,8 +213,15 @@ export class DocumentUploaderComponent {
             duration: 5000
           });
           // Reset for retry
-          this.selectedFile = null;
+          this.resetFileInput();
         }
       });
+  }
+
+  private resetFileInput() {
+    this.selectedFile = null;
+    if (this.fileInput && this.fileInput.nativeElement) {
+      this.fileInput.nativeElement.value = '';
+    }
   }
 }

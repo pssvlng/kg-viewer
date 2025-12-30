@@ -1,4 +1,4 @@
-import { Component, OnInit, ViewChild, AfterViewInit } from '@angular/core';
+import { Component, OnInit, ViewChild, AfterViewInit, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, FormControl, ReactiveFormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -14,6 +14,8 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { GraphsService, Graph } from '../../services/graphs.service';
 import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component';
+import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
+import { ResultsComponent } from '../results/results.component';
 
 @Component({
   selector: 'app-graphs-viewer',
@@ -40,12 +42,13 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
           <div class="title-section">
             <div class="title-with-button">
               <mat-card-title>Named Graphs</mat-card-title>
-              <button mat-mini-fab 
+              <button mat-raised-button 
                       color="primary"
                       (click)="refreshGraphs()"
                       matTooltip="Refresh Graphs"
                       class="refresh-btn">
                 <mat-icon>refresh</mat-icon>
+                Refresh
               </button>
             </div>
             <mat-card-subtitle>View And Manage Knowledge Graphs</mat-card-subtitle>
@@ -147,7 +150,9 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
     }
     
     .refresh-btn {
-      transform: scale(0.8);
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     
     .filter-section {
@@ -214,8 +219,11 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
     }
   `]
 })
-export class GraphsViewerComponent implements OnInit, AfterViewInit {
+export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavigable {
   @ViewChild(MatPaginator) paginator!: MatPaginator;
+  
+  @Input() useContainerNavigation = false;
+  @Output() contentNavigation = new EventEmitter<ContentNavigationEvent>();
   
   graphs: Graph[] = [];
   dataSource = new MatTableDataSource<Graph>([]);
@@ -286,11 +294,44 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit {
   }
 
   viewGraphAnalysis(graph: Graph) {
-    const dialogRef = this.dialog.open(GraphAnalysisDialogComponent, {
-      width: '90vw',
-      maxWidth: '1200px',
-      height: '80vh',
-      data: { graph }
+    if (this.useContainerNavigation) {
+      // Load the graph analysis data first, then navigate with the loaded data
+      this.loadGraphAnalysisData(graph);
+    } else {
+      // Use existing dialog system
+      const dialogRef = this.dialog.open(GraphAnalysisDialogComponent, {
+        width: '90vw',
+        maxWidth: '1200px',
+        height: '80vh',
+        data: { graph }
+      });
+    }
+  }
+  
+  private loadGraphAnalysisData(graph: Graph) {
+    this.graphsService.getGraphAnalysis(graph.name).subscribe({
+      next: (response) => {
+        if (response.success) {
+          // Now emit a single navigation event with the loaded data
+          this.contentNavigation.emit({
+            action: 'push',
+            component: ResultsComponent,
+            data: { 
+              results: response.tabs || [],
+              graphInfo: graph,
+              isInContainer: true,
+              hideActions: true
+            },
+            title: `View: ${graph.name} (${graph.uri})`
+          });
+        } else {
+          this.snackBar.open('Failed to load graph analysis', 'Close', { duration: 3000 });
+        }
+      },
+      error: (error) => {
+        console.error('Error loading graph analysis:', error);
+        this.snackBar.open('Error loading graph analysis', 'Close', { duration: 3000 });
+      }
     });
   }
 

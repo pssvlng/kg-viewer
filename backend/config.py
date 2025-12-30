@@ -17,7 +17,7 @@ class Config:
     external_frontend_url: str = os.getenv('EXTERNAL_FRONTEND_URL', 'http://localhost:4200')
     
     # Graph configuration
-    graph_base_uri: str = os.getenv('GRAPH_BASE_URI', 'http://example.org/graph')
+    graph_base_uri: str = os.getenv('GRAPH_BASE_URI', 'http://example.org') + '/graph'
     default_graph_name: str = os.getenv('DEFAULT_GRAPH_NAME', 'default')
     
     # Flask settings
