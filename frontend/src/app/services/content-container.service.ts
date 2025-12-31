@@ -31,6 +31,12 @@ export class ContentContainerService {
       stack = this.createStack(containerId);
     }
 
+    // Store current component state before pushing new frame
+    if (stack.frames.length > 0) {
+      const currentFrame = stack.frames[stack.currentIndex];
+      // We'll enhance this to capture component state if needed
+    }
+
     const newFrame: ContentFrame = {
       ...frame,
       id: `${containerId}-${Date.now()}`,

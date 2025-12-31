@@ -8,6 +8,7 @@ import { ResultsComponent, TabInfo } from './components/results/results.componen
 import { GraphsViewerComponent } from './components/graphs-viewer/graphs-viewer.component';
 import { ContentContainerComponent } from './components/content-container/content-container.component';
 import { ContentContainerService } from './services/content-container.service';
+import { UploadManagerComponent } from './components/upload-manager/upload-manager.component';
 
 @Component({
   selector: 'app-root',
@@ -20,7 +21,8 @@ import { ContentContainerService } from './services/content-container.service';
     UploadProgressComponent,
     ResultsComponent,
     GraphsViewerComponent,
-    ContentContainerComponent
+    ContentContainerComponent,
+    UploadManagerComponent
   ],
   template: `
     <mat-toolbar color="primary">
@@ -35,24 +37,9 @@ import { ContentContainerService } from './services/content-container.service';
         <!-- Upload Tab -->
         <mat-tab label="Upload">
           <div class="tab-content">
-            <app-document-uploader 
-              [disabled]="isUploading"
-              (uploadStarted)="onUploadStarted($event)"
-              (newUploadStarted)="onNewUploadStarted()"
-              (documentProcessed)="onDocumentProcessed($event)">
-            </app-document-uploader>
-            
-            <app-upload-progress
-              *ngIf="currentJobId && !results"
-              [jobId]="currentJobId"
-              (navigationRequested)="onNavigationRequested($event)">
-            </app-upload-progress>
-            
-            <app-results 
-              *ngIf="results" 
-              [results]="results"
-              (newUploadRequested)="onNewUploadRequested()">
-            </app-results>
+            <app-content-container 
+              containerId="upload">
+            </app-content-container>
           </div>
         </mat-tab>
         
@@ -89,16 +76,25 @@ import { ContentContainerService } from './services/content-container.service';
   `]
 })
 export class AppComponent implements OnInit {
-  results: any = null;
-  currentJobId: string | null = null;
   selectedTabIndex = 0;
-  isUploading = false;
 
   constructor(private contentContainerService: ContentContainerService) {}
 
   ngOnInit() {
-    // Initialize the named graphs container with the graphs viewer
+    // Initialize both containers
     this.initializeNamedGraphsContainer();
+    this.initializeUploadContainer();
+  }
+
+  private initializeUploadContainer() {
+    // Push upload components as the root components in upload container
+    setTimeout(() => {
+      this.contentContainerService.pushContent('upload', {
+        component: UploadManagerComponent,
+        data: {},
+        title: 'Upload'
+      });
+    });
   }
 
   private initializeNamedGraphsContainer() {
@@ -112,41 +108,5 @@ export class AppComponent implements OnInit {
         title: 'Named Graphs'
       });
     });
-  }
-
-  onUploadStarted(jobInfo: { jobId: string, filename: string }) {
-    this.currentJobId = jobInfo.jobId;
-    this.isUploading = true;
-    this.results = null;
-  }
-
-  onDocumentProcessed(results: TabInfo[]) {
-    this.results = results;
-    this.currentJobId = null;
-    this.isUploading = false;
-  }
-
-  onNewUploadStarted() {
-    this.results = null;
-    this.currentJobId = null;
-    this.isUploading = true;
-  }
-
-  onNavigationRequested(event: { action: string, data?: any }) {
-    if (event.action === 'goBack') {
-      this.currentJobId = null;
-      this.results = null;
-      this.isUploading = false;
-    } else if (event.action === 'showResults') {
-      this.results = event.data;
-      this.currentJobId = null;
-      this.isUploading = false;
-    }
-  }
-
-  onNewUploadRequested() {
-    this.results = null;
-    this.currentJobId = null;
-    this.isUploading = false;
   }
 }

@@ -12,11 +12,13 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { ServerSideDataSource, ServerSideDataSourceService } from '../../services/server-side-data-source.service';
 import { DocumentService } from '../../services/document.service';
 import { environment } from '../../../environments/environment';
 import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
+import { GraphViewerComponent } from '../graph-viewer/graph-viewer.component';
 
 export interface UploadInfo {
   status: string;
@@ -68,7 +70,8 @@ export interface TabInfo {
     MatIconModule,
     MatFormFieldModule,
     MatInputModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    MatTooltipModule
   ],
   template: `
     <mat-card class="results-card">
@@ -199,8 +202,23 @@ export interface TabInfo {
                     </td>
                   </ng-container>
                   
-                  <tr mat-header-row *matHeaderRowDef="['label', 'uri']"></tr>
-                  <tr mat-row *matRowDef="let row; columns: ['label', 'uri'];"></tr>
+                  <!-- Actions Column -->
+                  <ng-container matColumnDef="actions">
+                    <th mat-header-cell *matHeaderCellDef>Actions</th>
+                    <td mat-cell *matCellDef="let element">
+                      <button mat-icon-button 
+                              (click)="viewEntityGraph(element, tab)"
+                              matTooltip="View"
+                              matTooltipPosition="above"
+                              title="View"
+                              color="primary">
+                        <mat-icon>visibility</mat-icon>
+                      </button>
+                    </td>
+                  </ng-container>
+                  
+                  <tr mat-header-row *matHeaderRowDef="['label', 'uri', 'actions']"></tr>
+                  <tr mat-row *matRowDef="let row; columns: ['label', 'uri', 'actions'];"></tr>
                 </table>
                 
                 <!-- Server-side table -->
@@ -226,8 +244,23 @@ export interface TabInfo {
                     </td>
                   </ng-container>
                   
-                  <tr mat-header-row *matHeaderRowDef="['label', 'uri']"></tr>
-                  <tr mat-row *matRowDef="let row; columns: ['label', 'uri'];"></tr>
+                  <!-- Actions Column -->
+                  <ng-container matColumnDef="actions">
+                    <th mat-header-cell *matHeaderCellDef>Actions</th>
+                    <td mat-cell *matCellDef="let element">
+                      <button mat-icon-button 
+                              (click)="viewEntityGraph(element, tab)"
+                              matTooltip="View"
+                              matTooltipPosition="above"
+                              title="View"
+                              color="primary">
+                        <mat-icon>visibility</mat-icon>
+                      </button>
+                    </td>
+                  </ng-container>
+                  
+                  <tr mat-header-row *matHeaderRowDef="['label', 'uri', 'actions']"></tr>
+                  <tr mat-row *matRowDef="let row; columns: ['label', 'uri', 'actions'];"></tr>
                 </table>
               </div>
               
@@ -423,6 +456,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, Conte
   @Input() isInContainer = false; // New flag to detect container usage
   @Output() newUploadRequested = new EventEmitter<void>();
   @Output() contentNavigation = new EventEmitter<ContentNavigationEvent>();
+  @Output() viewEntityGraphRequested = new EventEmitter<any>();
   
   tabs: TabInfo[] = [];
   dataSources = new Map<string, MatTableDataSource<any>>();
@@ -440,7 +474,9 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, Conte
     private serverSideDataSourceService: ServerSideDataSourceService,
     private http: HttpClient,
     private documentService: DocumentService
-  ) {}
+  ) {
+    console.log('Results: Component constructor called');
+  }
 
   ngAfterViewInit() {
     // Connect paginators and sorts to data sources after view initialization
@@ -605,13 +641,14 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, Conte
   }
 
   getDisplayedColumns(tab: TabInfo): string[] {
-    // Always return label and uri for table tabs
-    return ['label', 'uri'];
+    // Always return label, uri, and actions for table tabs
+    return ['label', 'uri', 'actions'];
   }
 
   getColumnLabel(column: string): string {
     if (column === 'label') return 'Label';
     if (column === 'uri') return 'URI';
+    if (column === 'actions') return 'Actions';
     return column.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
   }
 
@@ -720,6 +757,53 @@ LIMIT 1000`;
     if (tabIndex !== -1 && this.tabGroup) {
       this.tabGroup.selectedIndex = tabIndex;
     }
+  }
+
+  viewEntityGraph(element: any, tab: TabInfo) {
+    console.log('Results: viewEntityGraph called with isInContainer:', this.isInContainer);
+    console.log('Results: element:', element);
+    console.log('Results: tab:', tab);
+    
+    const graphName = this.extractGraphName(tab);
+    
+    if (this.isInContainer) {
+      console.log('Results: Using container navigation approach');
+      // Use container navigation - preserve current results state
+      this.contentNavigation.emit({
+        action: 'push',
+        component: GraphViewerComponent,
+        data: {
+          entityUri: element.uri,
+          entityLabel: element.label,
+          graphName: graphName,
+          // Store the current results state to restore when coming back
+          preserveState: {
+            results: this.results,
+            currentTabIndex: this.getCurrentTabIndex()
+          }
+        },
+        title: `Graph: ${element.label || 'Entity'}`
+      });
+    } else {
+      console.log('Results: Using simple event emission approach');
+      // Simple approach: emit event for parent component to handle visibility
+      console.log('Results: Emitting viewEntityGraphRequested event for:', element);
+      this.viewEntityGraphRequested.emit({
+        entityUri: element.uri,
+        entityLabel: element.label,
+        graphName: graphName
+      });
+    }
+  }
+
+  private getCurrentTabIndex(): number {
+    // Try to get the current active tab index if possible
+    return 0; // Default to first tab
+  }
+
+  private extractGraphName(tab: TabInfo): string {
+    // Extract graph name from tab's upload info
+    return tab.uploadInfo?.graphName || tab.uploadInfo?.graphId || 'default';
   }
 
   newUpload() {

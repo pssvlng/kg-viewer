@@ -206,6 +206,26 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
         });
         break;
       case 'back':
+        // If there's restore state data, update the frame before going back
+        if (event.data?.restoreState) {
+          const stack = this.contentService.getStack(this.containerId);
+          if (stack && stack.currentIndex > 0) {
+            const previousFrame = stack.frames[stack.currentIndex - 1];
+            console.log('Restoring state to previous frame:', event.data.restoreState);
+            console.log('Previous frame data before merge:', previousFrame.data);
+            
+            // Merge the restore state into the previous frame's data
+            // Extract the actual properties from the restoreState object
+            const restoreData = event.data.restoreState;
+            previousFrame.data = { 
+              ...previousFrame.data, 
+              // Spread the properties from restoreState (e.g. results, currentTabIndex)
+              ...(restoreData || {})
+            };
+            
+            console.log('Previous frame data after merge:', previousFrame.data);
+          }
+        }
         this.goBack();
         break;
     }

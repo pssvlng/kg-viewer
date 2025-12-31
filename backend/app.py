@@ -491,7 +491,7 @@ def create_analysis_tabs(analysis_data, graph_name, graph_uri, sparql_endpoint):
     
     # Create detailed tabs for each class with instances
     try:
-        for class_item in list(analysis_data.get('classList', []))[:10]:
+        for class_item in list(analysis_data.get('classList', [])):
             if isinstance(class_item, dict) and class_item.get('instanceCount', 0) > 0:
                 class_uri = class_item.get('uri')
                 class_label = class_item.get('label', class_uri.split('/')[-1] if class_uri else 'Unknown')
@@ -1103,6 +1103,147 @@ def get_class_instances_paginated(graph_name, class_uri):
             'success': False,
             'error': str(e)
         }), 500
+
+@app.route('/api/graphs/<graph_name>/entities/<path:entity_uri>/graph', methods=['GET'])
+def get_entity_graph(graph_name, entity_uri):
+    """Get graph data for an entity and its connections"""
+    try:
+        from urllib.parse import unquote
+        entity_uri = unquote(entity_uri)
+        depth = int(request.args.get('depth', 1))
+        max_nodes = int(request.args.get('maxNodes', 50))
+        
+        graph_uri = config.get_graph_uri(graph_name)
+        
+        # SPARQL query for entity and connections
+        query = f"""
+        SELECT DISTINCT ?subject ?predicate ?object ?subjectLabel ?objectLabel ?predicateLabel
+        FROM <{graph_uri}>
+        WHERE {{
+            {{
+                # Direct connections from entity
+                <{entity_uri}> ?predicate ?object .
+                BIND(<{entity_uri}> AS ?subject)
+                FILTER(!isLiteral(?object))
+            }} UNION {{
+                # Direct connections to entity  
+                ?subject ?predicate <{entity_uri}> .
+                BIND(<{entity_uri}> AS ?object)
+                FILTER(!isLiteral(?subject))
+            }}
+            
+            # Get labels
+            OPTIONAL {{ ?subject rdfs:label ?subjectLabel }}
+            OPTIONAL {{ ?object rdfs:label ?objectLabel }}
+            OPTIONAL {{ ?predicate rdfs:label ?predicateLabel }}
+        }}
+        LIMIT {max_nodes * 3}
+        """
+        
+        results = query_sparql(query)
+        
+        if not results:
+            return jsonify({
+                'nodes': [{'id': entity_uri, 'label': get_uri_fragment(entity_uri), 'uri': entity_uri, 'isCentral': True}],
+                'edges': [],
+                'centralNode': entity_uri
+            })
+        
+        nodes = {}
+        edges = []
+        
+        # Process results
+        for binding in results:
+            subject = binding['subject']['value']
+            predicate = binding['predicate']['value']
+            obj = binding['object']['value']
+            
+            # Add subject node
+            if subject not in nodes:
+                subject_label = binding.get('subjectLabel', {}).get('value', get_uri_fragment(subject))
+                nodes[subject] = {
+                    'id': subject,
+                    'label': subject_label,
+                    'uri': subject,
+                    'isCentral': subject == entity_uri
+                }
+            
+            # Add object node
+            if obj not in nodes:
+                object_label = binding.get('objectLabel', {}).get('value', get_uri_fragment(obj))
+                nodes[obj] = {
+                    'id': obj,
+                    'label': object_label,
+                    'uri': obj,
+                    'isCentral': obj == entity_uri
+                }
+            
+            # Add edge
+            predicate_label = binding.get('predicateLabel', {}).get('value', get_uri_fragment(predicate))
+            edge_id = f"{subject}--{predicate}--{obj}"
+            edges.append({
+                'id': edge_id,
+                'source': subject,
+                'target': obj,
+                'label': predicate_label,
+                'uri': predicate
+            })
+        
+        return jsonify({
+            'nodes': list(nodes.values()),
+            'edges': edges,
+            'centralNode': entity_uri
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/graphs/<graph_name>/entities/<path:entity_uri>/literals', methods=['GET'])
+def get_entity_literals(graph_name, entity_uri):
+    """Get literal properties for an entity"""
+    try:
+        from urllib.parse import unquote
+        entity_uri = unquote(entity_uri)
+        
+        graph_uri = config.get_graph_uri(graph_name)
+        
+        query = f"""
+        SELECT ?predicate ?value ?predicateLabel
+        FROM <{graph_uri}>
+        WHERE {{
+            <{entity_uri}> ?predicate ?value .
+            FILTER(isLiteral(?value))
+            OPTIONAL {{ ?predicate rdfs:label ?predicateLabel }}
+        }}
+        ORDER BY ?predicate
+        """
+        
+        results = query_sparql(query)
+        
+        literals = []
+        for binding in results:
+            predicate = binding['predicate']['value']
+            value = binding['value']['value']
+            predicate_label = binding.get('predicateLabel', {}).get('value')
+            
+            literals.append({
+                'predicate': predicate,
+                'predicateLabel': predicate_label,
+                'value': value
+            })
+        
+        return jsonify(literals)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def get_uri_fragment(uri):
+    """Extract the fragment from a URI (part after # or last /)"""
+    if '#' in uri:
+        return uri.split('#')[-1]
+    elif '/' in uri:
+        return uri.split('/')[-1]
+    return uri
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
