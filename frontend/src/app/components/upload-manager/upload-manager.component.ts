@@ -34,6 +34,7 @@ import { ContentNavigable, ContentNavigationEvent } from '../../services/content
         *ngIf="results" 
         [results]="results"
         [isInContainer]="true"
+        [hideActions]="true"
         (newUploadRequested)="onNewUploadRequested()"
         (contentNavigation)="onNavigationRequested($event)">
       </app-results>

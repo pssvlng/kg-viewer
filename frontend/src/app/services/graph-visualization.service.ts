@@ -41,7 +41,7 @@ export class GraphVisualizationService {
 
   constructor(private http: HttpClient) {}
 
-  getEntityGraph(graphName: string, entityUri: string, depth: number = 1): Observable<GraphData> {
+  getEntityGraph(graphName: string, entityUri: string, depth: number = 1, direction: 'outward' | 'inward' | 'both' = 'both'): Observable<GraphData> {
     const encodedGraphName = encodeURIComponent(graphName);
     const encodedEntityUri = encodeURIComponent(entityUri);
     
@@ -50,7 +50,8 @@ export class GraphVisualizationService {
       { 
         params: { 
           depth: depth.toString(),
-          maxNodes: '50'
+          maxNodes: '50',
+          direction: direction
         }
       }
     );

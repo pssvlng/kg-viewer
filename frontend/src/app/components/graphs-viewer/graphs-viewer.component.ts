@@ -320,7 +320,7 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
               results: response.tabs || [],
               graphInfo: graph,
               isInContainer: true,
-              hideActions: true
+              hideActions: false
             },
             title: `View: ${graph.name} (${graph.uri})`
           });

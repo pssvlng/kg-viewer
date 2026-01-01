@@ -203,7 +203,7 @@ export interface TabInfo {
                   </ng-container>
                   
                   <!-- Actions Column -->
-                  <ng-container matColumnDef="actions">
+                  <ng-container matColumnDef="actions" *ngIf="!hideActions">
                     <th mat-header-cell *matHeaderCellDef>Actions</th>
                     <td mat-cell *matCellDef="let element">
                       <button mat-icon-button 
@@ -217,8 +217,8 @@ export interface TabInfo {
                     </td>
                   </ng-container>
                   
-                  <tr mat-header-row *matHeaderRowDef="['label', 'uri', 'actions']"></tr>
-                  <tr mat-row *matRowDef="let row; columns: ['label', 'uri', 'actions'];"></tr>
+                  <tr mat-header-row *matHeaderRowDef="getDisplayedColumns(tab)"></tr>
+                  <tr mat-row *matRowDef="let row; columns: getDisplayedColumns(tab);"></tr>
                 </table>
                 
                 <!-- Server-side table -->
@@ -245,7 +245,7 @@ export interface TabInfo {
                   </ng-container>
                   
                   <!-- Actions Column -->
-                  <ng-container matColumnDef="actions">
+                  <ng-container matColumnDef="actions" *ngIf="!hideActions">
                     <th mat-header-cell *matHeaderCellDef>Actions</th>
                     <td mat-cell *matCellDef="let element">
                       <button mat-icon-button 
@@ -259,8 +259,8 @@ export interface TabInfo {
                     </td>
                   </ng-container>
                   
-                  <tr mat-header-row *matHeaderRowDef="['label', 'uri', 'actions']"></tr>
-                  <tr mat-row *matRowDef="let row; columns: ['label', 'uri', 'actions'];"></tr>
+                  <tr mat-header-row *matHeaderRowDef="getDisplayedColumns(tab)"></tr>
+                  <tr mat-row *matRowDef="let row; columns: getDisplayedColumns(tab);"></tr>
                 </table>
               </div>
               
@@ -641,8 +641,8 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, Conte
   }
 
   getDisplayedColumns(tab: TabInfo): string[] {
-    // Always return label, uri, and actions for table tabs
-    return ['label', 'uri', 'actions'];
+    // Return conditional columns based on hideActions
+    return this.hideActions ? ['label', 'uri'] : ['label', 'uri', 'actions'];
   }
 
   getColumnLabel(column: string): string {
