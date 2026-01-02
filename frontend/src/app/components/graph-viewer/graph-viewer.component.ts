@@ -1,6 +1,8 @@
 import { Component, OnInit, Input, Output, EventEmitter, ChangeDetectorRef, ViewChild, ElementRef, AfterViewInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatIconModule } from '@angular/material/icon';
 import { MatListModule } from '@angular/material/list';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
@@ -15,7 +17,9 @@ declare var cytoscape: any;
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     MatButtonModule,
+    MatCheckboxModule,
     MatIconModule,
     MatListModule,
     MatProgressSpinnerModule,
@@ -41,6 +45,12 @@ declare var cytoscape: any;
           <button mat-button (click)="toggleFullscreen()" [matTooltip]="isFullscreen ? 'Exit Fullscreen (ESC)' : 'Enter Fullscreen'">
             <mat-icon>{{ isFullscreen ? 'fullscreen_exit' : 'fullscreen' }}</mat-icon>
           </button>
+          <mat-checkbox 
+            [(ngModel)]="includeBidirectionalRelationships" 
+            (change)="onBidirectionalToggle($event)"
+            matTooltip="Include incoming connections when expanding nodes">
+            Bidirectional expansion
+          </mat-checkbox>
         </div>
       </div>
       
@@ -291,6 +301,9 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   cy: any; // Cytoscape instance
   isFullscreen = false;
   expandedNodes = new Set<string>(); // Track which nodes have been expanded
+  expandedNodesData = new Map<string, any>(); // Store original expansion data
+  includeBidirectionalRelationships = false;
+  lastSelectedNode: string | null = null; // Track last clicked node for orange color
 
   // Cytoscape configuration
   layout = {
@@ -333,7 +346,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     {
       selector: 'node[isCentral = "true"]',
       style: {
-        'background-color': '#f44336',
+        'background-color': '#f44336',  // Always red for central node
         'border-color': '#d32f2f',
         'border-width': 4,
         'width': 60,
@@ -343,16 +356,8 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     {
       selector: 'node:selected',
       style: {
-        'background-color': '#ff9800',
+        'background-color': '#ff9800',  // Orange for selected/clicked node
         'border-color': '#f57c00',
-        'border-width': 3
-      }
-    },
-    {
-      selector: 'node[expanded = "true"]',
-      style: {
-        'background-color': '#4caf50',
-        'border-color': '#388e3c',
         'border-width': 3
       }
     },
@@ -428,10 +433,27 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
           
           // Mark the central node as expanded since its connections are already loaded
           this.expandedNodes.add(this.entityUri);
-          const centralNode = this.cy.getElementById(this.entityUri);
-          if (centralNode.length > 0) {
-            centralNode.data('expanded', true);
-          }
+          
+          // Store initial graph data as expansion data for the central node
+          // Use depth=1 to ensure we only get immediate connections
+          this.graphService.getEntityGraph(this.graphName, this.entityUri, 1)
+            .subscribe({
+              next: (centralData) => {
+                const normalizedData = {
+                  ...centralData,
+                  nodes: centralData.nodes.map((node: any) => ({
+                    ...node,
+                    id: node.uri || node.id,
+                    uri: node.uri || node.id
+                  }))
+                };
+                this.expandedNodesData.set(this.entityUri, normalizedData);
+                console.log('Stored initial central node expansion data with depth 1');
+              },
+              error: (err) => {
+                console.error('Error storing initial central data:', err);
+              }
+            });
         }
       }, 100);
     } catch (error) {
@@ -472,8 +494,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
           id: node.uri,
           label: node.label || this.getUriFragment(node.uri),
           uri: node.uri,
-          isCentral: node.isCentral ? 'true' : 'false',
-          expanded: 'false'
+          isCentral: node.isCentral ? 'true' : 'false'
         }
       });
     });
@@ -497,31 +518,36 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     console.log('Created elements:', elements);
     return elements;
   }  onNodeClick(event: any) {
-    const node = event.target;
-    if (node.isNode && node.isNode()) {
-      const nodeId = node.id();
-      const nodeLabel = node.data('label');
-      
-      this.selectedNodeLabel = nodeLabel;
-      this.loadEntityLiterals(nodeId);
-      
-      // Expand the graph with connected nodes
-      this.expandNodeConnections(nodeId);
+    const nodeUri = event.target.data('uri');
+    const nodeLabel = event.target.data('label');
+    
+    console.log('Node clicked:', nodeUri);
+    
+    // Clear previous selection
+    if (this.cy) {
+      this.cy.nodes().unselect();
     }
+    
+    // Select the clicked node (this will apply orange color)
+    event.target.select();
+    
+    // Track the last selected node
+    this.lastSelectedNode = nodeUri;
+    
+    // Expand the node's connections
+    this.expandNodeConnections(nodeUri);
+    
+    // Load and display node properties
+    this.loadEntityLiterals(nodeUri);
+    this.selectedNodeLabel = nodeLabel;
   }
 
   expandNodeConnections(nodeUri: string) {
     // Don't expand the central node - its connections are already loaded
     if (nodeUri === this.entityUri) {
       console.log('Skipping expansion of central node:', nodeUri);
-      // Just mark it as expanded to show the green color
+      // Just mark it as expanded for tracking purposes
       this.expandedNodes.add(nodeUri);
-      if (this.cy) {
-        const centralNode = this.cy.getElementById(nodeUri);
-        if (centralNode.length > 0) {
-          centralNode.data('expanded', true);
-        }
-      }
       return;
     }
 
@@ -533,8 +559,8 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
     console.log('Expanding graph for node:', nodeUri);
     
-    // Load connected nodes for the clicked node (only outward connections)
-    this.graphService.getEntityGraph(this.graphName, nodeUri, 1, 'outward')
+    // Load connected nodes for the clicked node (depth=1 for single level expansion)
+    this.graphService.getEntityGraph(this.graphName, nodeUri, 1)
       .subscribe({
         next: (newGraphData) => {
           console.log('Received expansion data for node:', nodeUri);
@@ -543,22 +569,26 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
           console.log('Current graph has nodes:', this.cy.nodes().length);
           console.log('Current graph has edges:', this.cy.edges().length);
           
-          // Filter to only include outward edges from the expanded node
-          const outwardEdges = newGraphData.edges.filter(edge => edge.source === nodeUri);
-          
-          // Get the target node IDs from the outward edges
-          const connectedNodeIds = new Set(outwardEdges.map(edge => edge.target));
-          
-          // Filter nodes to only include the expanded node and its outward connections
-          const filteredNodes = newGraphData.nodes.filter(node => 
-            node.id === nodeUri || connectedNodeIds.has(node.id)
-          );
-          
-          const filteredGraphData = {
+          // Store the original expansion data with consistent node structure
+          const normalizedData = {
             ...newGraphData,
-            nodes: filteredNodes,
-            edges: outwardEdges
+            nodes: newGraphData.nodes.map((node: any) => ({
+              ...node,
+              id: node.uri || node.id,
+              uri: node.uri || node.id
+            })),
+            edges: newGraphData.edges.map((edge: any) => ({
+              ...edge,
+              source: edge.source,
+              target: edge.target
+            }))
           };
+          
+          this.expandedNodesData.set(nodeUri, normalizedData);
+          console.log('Stored expansion data for:', nodeUri);
+          
+          // Filter based on bidirectional setting
+          const filteredGraphData = this.filterGraphData(normalizedData, nodeUri);
           
           console.log('Filtered edges (outward only):', filteredGraphData.edges.length);
           console.log('Filtered nodes (connected only):', filteredGraphData.nodes.length);
@@ -659,12 +689,8 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       // Add new elements to cytoscape
       this.cy.add(elementsToAdd);
       
-      // Mark the expanded node as expanded
+      // Mark the expanded node as expanded for tracking
       this.expandedNodes.add(expandedNodeUri);
-      const expandedNode = this.cy.getElementById(expandedNodeUri);
-      if (expandedNode.length > 0) {
-        expandedNode.data('expanded', true);
-      }
       
       // Run layout to position new nodes
       const layout = this.cy.layout({
@@ -684,10 +710,6 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       console.log('No new elements to add');
       // Still mark as expanded even if no new nodes were found
       this.expandedNodes.add(expandedNodeUri);
-      const expandedNode = this.cy.getElementById(expandedNodeUri);
-      if (expandedNode.length > 0) {
-        expandedNode.data('expanded', true);
-      }
     }
   }
 
@@ -851,6 +873,175 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         this.cy.resize(); // Final resize to ensure container bounds are respected
       }
     }, 300);
+  }
+
+  onBidirectionalToggle(event: any) {
+    console.log('Bidirectional toggle changed to:', event.checked);
+    console.log('Current expanded nodes:', this.expandedNodes);
+    console.log('Current expanded data keys:', Array.from(this.expandedNodesData.keys()));
+    
+    this.includeBidirectionalRelationships = event.checked;
+    
+    // Only refresh if we have expanded nodes
+    if (this.expandedNodesData.size > 0) {
+      try {
+        this.refreshExpandedNodes();
+      } catch (error) {
+        console.error('Error refreshing expanded nodes:', error);
+        // Fallback: reload the entire graph
+        this.loadGraph();
+      }
+    }
+  }
+
+  filterGraphData(graphData: any, expandedNodeUri: string) {
+    console.log(`Filtering graph data for node: ${expandedNodeUri}, bidirectional: ${this.includeBidirectionalRelationships}`);
+    console.log('Original data:', graphData);
+    
+    if (this.includeBidirectionalRelationships) {
+      // Include all connections (bidirectional) but only direct connections of the expanded node
+      const directEdges = graphData.edges.filter((edge: any) => 
+        edge.source === expandedNodeUri || edge.target === expandedNodeUri
+      );
+      
+      // Get all node IDs involved in direct connections
+      const connectedNodeIds = new Set<string>();
+      connectedNodeIds.add(expandedNodeUri); // Include the expanded node itself
+      
+      directEdges.forEach((edge: any) => {
+        connectedNodeIds.add(edge.source);
+        connectedNodeIds.add(edge.target);
+      });
+      
+      const filteredNodes = graphData.nodes.filter((node: any) => {
+        const nodeId = node.uri || node.id;
+        return connectedNodeIds.has(nodeId);
+      });
+      
+      console.log('Bidirectional mode - filtered to direct connections only');
+      return {
+        ...graphData,
+        nodes: filteredNodes,
+        edges: directEdges
+      };
+    } else {
+      // Filter to only include outward edges from the expanded node (single depth)
+      const outwardEdges = graphData.edges.filter((edge: any) => edge.source === expandedNodeUri);
+      
+      // Get the target node IDs from the outward edges
+      const connectedNodeIds = new Set(outwardEdges.map((edge: any) => edge.target));
+      
+      // Include the expanded node itself and all nodes it points to
+      const filteredNodes = graphData.nodes.filter((node: any) => {
+        const nodeId = node.uri || node.id;
+        return nodeId === expandedNodeUri || connectedNodeIds.has(nodeId);
+      });
+      
+      const result = {
+        ...graphData,
+        nodes: filteredNodes,
+        edges: outwardEdges
+      };
+      
+      console.log(`Outward mode - filtered to ${filteredNodes.length} nodes and ${outwardEdges.length} edges`);
+      return result;
+    }
+  }
+
+  refreshExpandedNodes() {
+    if (!this.cy || this.expandedNodesData.size === 0) {
+      return;
+    }
+
+    console.log('Refreshing expanded nodes with bidirectional:', this.includeBidirectionalRelationships);
+    console.log('Expanded nodes data:', this.expandedNodesData);
+    console.log('Expanded nodes set:', this.expandedNodes);
+
+    // Clear the current graph completely and rebuild from scratch
+    this.cy.elements().remove();
+    
+    // Start with the central node
+    const centralElement = {
+      data: {
+        id: this.entityUri,
+        label: this.entityLabel,
+        uri: this.entityUri,
+        isCentral: 'true'  // Central node always red
+      }
+    };
+    
+    // Collections for all nodes and edges
+    const allNodes = new Map<string, any>();
+    const allEdges = new Map<string, any>();
+    
+    // Add central node
+    allNodes.set(this.entityUri, centralElement);
+    
+    // Process each expanded node's data and apply filtering
+    this.expandedNodesData.forEach((originalData, expandedNodeUri) => {
+      console.log(`Processing expansion data for node: ${expandedNodeUri}`);
+      
+      const filteredData = this.filterGraphData(originalData, expandedNodeUri);
+      
+      // Add all nodes from this expansion
+      filteredData.nodes.forEach((node: any) => {
+        const nodeId = node.uri || node.id;
+        if (!allNodes.has(nodeId)) {
+          allNodes.set(nodeId, {
+            data: {
+              id: nodeId,
+              label: node.label,
+              uri: nodeId,
+              isCentral: nodeId === this.entityUri ? 'true' : 'false'  // Only central node gets red
+            }
+          });
+        }
+      });
+      
+      // Add all edges from this expansion
+      filteredData.edges.forEach((edge: any) => {
+        const edgeId = `${edge.source}---${edge.target}---${edge.uri}`;
+        if (!allEdges.has(edgeId)) {
+          allEdges.set(edgeId, {
+            data: {
+              id: edgeId,
+              source: edge.source,
+              target: edge.target,
+              label: edge.label,
+              uri: edge.uri
+            }
+          });
+        }
+      });
+    });
+    
+    // Convert maps to arrays and add to cytoscape
+    const elementsToAdd = [...allNodes.values(), ...allEdges.values()];
+    
+    console.log('Adding elements to cytoscape:', elementsToAdd.length);
+    console.log('Nodes:', allNodes.size, 'Edges:', allEdges.size);
+    
+    if (elementsToAdd.length > 0) {
+      this.cy.add(elementsToAdd);
+      
+      // Restore selection state for the last selected node
+      if (this.lastSelectedNode && this.cy.getElementById(this.lastSelectedNode).length > 0) {
+        this.cy.getElementById(this.lastSelectedNode).select();
+      }
+      
+      // Run layout
+      const layout = this.cy.layout({
+        name: 'cose',
+        animate: true,
+        animationDuration: 1000,
+        fit: true,
+        padding: 30,
+        nodeRepulsion: 400000,
+        idealEdgeLength: 100,
+        edgeElasticity: 100
+      });
+      layout.run();
+    }
   }
 
   @HostListener('document:keydown.escape', ['$event'])
