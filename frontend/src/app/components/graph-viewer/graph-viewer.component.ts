@@ -329,7 +329,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     {
       selector: 'node',
       style: {
-        'background-color': '#1976d2',
+        'background-color': '#1976d2',  // Default blue for all nodes
         'label': 'data(label)',
         'width': 50,
         'height': 50,
@@ -344,21 +344,29 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       }
     },
     {
-      selector: 'node[isCentral = "true"]',
+      selector: 'node[expanded = "true"]',
       style: {
-        'background-color': '#f44336',  // Always red for central node
-        'border-color': '#d32f2f',
-        'border-width': 4,
-        'width': 60,
-        'height': 60
+        'background-color': '#ff9800',  // Orange for expanded nodes
+        'border-color': '#f57c00',
+        'border-width': 3
       }
     },
     {
       selector: 'node:selected',
       style: {
-        'background-color': '#ff9800',  // Orange for selected/clicked node
+        'background-color': '#ff9800',  // Orange for selected nodes
         'border-color': '#f57c00',
         'border-width': 3
+      }
+    },
+    {
+      selector: 'node[isCentral = "true"]',
+      style: {
+        'background-color': '#f44336',  // Red for central node - ALWAYS LAST
+        'border-color': '#d32f2f',
+        'border-width': 4,
+        'width': 60,
+        'height': 60
       }
     },
     {
@@ -433,6 +441,10 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
           
           // Mark the central node as expanded since its connections are already loaded
           this.expandedNodes.add(this.entityUri);
+          const centralNode = this.cy.getElementById(this.entityUri);
+          if (centralNode.length > 0) {
+            centralNode.data('expanded', 'true');
+          }
           
           // Store initial graph data as expansion data for the central node
           // Use depth=1 to ensure we only get immediate connections
@@ -489,12 +501,16 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
     // Add nodes
     data.nodes.forEach(node => {
+      const isCentral = node.isCentral === true || node.uri === this.entityUri;
+      console.log(`Creating node: ${node.uri}, isCentral: ${isCentral}, entityUri: ${this.entityUri}`);
+      
       elements.push({
         data: {
           id: node.uri,
           label: node.label || this.getUriFragment(node.uri),
           uri: node.uri,
-          isCentral: node.isCentral ? 'true' : 'false'
+          isCentral: isCentral ? 'true' : 'false',
+          expanded: 'false'  // Initially not expanded
         }
       });
     });
@@ -548,6 +564,13 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       console.log('Skipping expansion of central node:', nodeUri);
       // Just mark it as expanded for tracking purposes
       this.expandedNodes.add(nodeUri);
+      // Update the visual state (central stays red due to CSS priority)
+      if (this.cy) {
+        const centralNode = this.cy.getElementById(nodeUri);
+        if (centralNode.length > 0) {
+          centralNode.data('expanded', 'true');
+        }
+      }
       return;
     }
 
@@ -689,8 +712,15 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       // Add new elements to cytoscape
       this.cy.add(elementsToAdd);
       
-      // Mark the expanded node as expanded for tracking
+      // Mark the expanded node as expanded for tracking and coloring
       this.expandedNodes.add(expandedNodeUri);
+      const expandedNode = this.cy.getElementById(expandedNodeUri);
+      if (expandedNode.length > 0) {
+        console.log(`Marking node ${expandedNodeUri} as expanded`);
+        console.log(`Node data before:`, expandedNode.data());
+        expandedNode.data('expanded', 'true');
+        console.log(`Node data after:`, expandedNode.data());
+      }
       
       // Run layout to position new nodes
       const layout = this.cy.layout({
@@ -710,6 +740,10 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       console.log('No new elements to add');
       // Still mark as expanded even if no new nodes were found
       this.expandedNodes.add(expandedNodeUri);
+      const expandedNode = this.cy.getElementById(expandedNodeUri);
+      if (expandedNode.length > 0) {
+        expandedNode.data('expanded', 'true');
+      }
     }
   }
 
@@ -961,14 +995,17 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     this.cy.elements().remove();
     
     // Start with the central node
+    console.log(`Creating central node: ${this.entityUri}`);
     const centralElement = {
       data: {
         id: this.entityUri,
         label: this.entityLabel,
         uri: this.entityUri,
-        isCentral: 'true'  // Central node always red
+        isCentral: 'true',  // Central node always red
+        expanded: this.expandedNodes.has(this.entityUri) ? 'true' : 'false'
       }
     };
+    console.log('Central element data:', centralElement.data);
     
     // Collections for all nodes and edges
     const allNodes = new Map<string, any>();
@@ -987,12 +1024,16 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       filteredData.nodes.forEach((node: any) => {
         const nodeId = node.uri || node.id;
         if (!allNodes.has(nodeId)) {
+          const isCentral = nodeId === this.entityUri;
+          console.log(`Adding node to refresh: ${nodeId}, isCentral: ${isCentral}`);
+          
           allNodes.set(nodeId, {
             data: {
               id: nodeId,
               label: node.label,
               uri: nodeId,
-              isCentral: nodeId === this.entityUri ? 'true' : 'false'  // Only central node gets red
+              isCentral: isCentral ? 'true' : 'false',
+              expanded: this.expandedNodes.has(nodeId) ? 'true' : 'false'  // Track expansion for coloring
             }
           });
         }
