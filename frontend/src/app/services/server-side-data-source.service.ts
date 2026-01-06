@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject, Observable, Subscription } from 'rxjs';
 import { DataSource } from '@angular/cdk/collections';
 import { environment } from '../../environments/environment';
 
@@ -32,6 +32,7 @@ export class ServerSideDataSource extends DataSource<any> {
     hasNext: false,
     hasPrevious: false
   });
+  private currentRequest: Subscription | null = null;
 
   public loading$ = this.loadingSubject.asObservable();
   public pagination$ = this.paginationSubject.asObservable();
@@ -49,6 +50,27 @@ export class ServerSideDataSource extends DataSource<any> {
     this.dataSubject.complete();
     this.loadingSubject.complete();
     this.paginationSubject.complete();
+  }
+
+  cancelCurrentRequest() {
+    if (this.currentRequest) {
+      this.currentRequest.unsubscribe();
+      this.currentRequest = null;
+    }
+    this.loadingSubject.next(false);
+  }
+
+  clearData() {
+    this.cancelCurrentRequest();
+    this.dataSubject.next([]);
+    this.paginationSubject.next({
+      page: 1,
+      pageSize: 25,
+      totalItems: 0,
+      totalPages: 0,
+      hasNext: false,
+      hasPrevious: false
+    });
   }
 
   loadData(graphName: string, classUri: string, page: number = 1, pageSize: number = 25, filter: string = '') {
@@ -83,6 +105,53 @@ export class ServerSideDataSource extends DataSource<any> {
   getCurrentPagination(): PaginationInfo {
     return this.paginationSubject.value;
   }
+
+  loadSearchData(graphName: string, searchTerm: string, page: number = 1, pageSize: number = 25) {
+    console.log('ServerSideDataSource: Starting search request', { graphName, searchTerm, page, pageSize });
+    
+    // Cancel any ongoing request
+    this.cancelCurrentRequest();
+    
+    this.loadingSubject.next(true);
+
+    const params = new HttpParams()
+      .set('q', searchTerm)
+      .set('page', page.toString())
+      .set('pageSize', pageSize.toString());
+
+    const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/search`;
+    console.log('ServerSideDataSource: Making request to:', url, 'with params:', params.toString());
+
+    this.currentRequest = this.http.get<any>(url, { params }).subscribe({
+      next: (response) => {
+        console.log('ServerSideDataSource: Received response:', response);
+        if (response && response.results) {
+          this.dataSubject.next(response.results);
+          this.paginationSubject.next({
+            page: response.page,
+            pageSize: response.pageSize,
+            totalItems: response.total,
+            totalPages: response.totalPages,
+            hasNext: response.page < response.totalPages,
+            hasPrevious: response.page > 1
+          });
+          console.log('ServerSideDataSource: Updated data and pagination');
+        } else {
+          this.dataSubject.next([]);
+          console.error('Search returned error:', response?.error);
+        }
+        this.loadingSubject.next(false);
+        this.currentRequest = null;
+        console.log('ServerSideDataSource: Loading completed');
+      },
+      error: (error) => {
+        console.error('ServerSideDataSource: HTTP Error:', error);
+        this.dataSubject.next([]);
+        this.loadingSubject.next(false);
+        this.currentRequest = null;
+      }
+    });
+  }
 }
 
 @Injectable({
@@ -91,6 +160,10 @@ export class ServerSideDataSource extends DataSource<any> {
 export class ServerSideDataSourceService {
   constructor(private http: HttpClient) {}
 
+  create(): ServerSideDataSource {
+    return new ServerSideDataSource(this.http);
+  }
+  
   createDataSource(): ServerSideDataSource {
     return new ServerSideDataSource(this.http);
   }

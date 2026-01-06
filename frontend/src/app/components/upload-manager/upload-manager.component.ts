@@ -35,6 +35,9 @@ import { ContentNavigable, ContentNavigationEvent } from '../../services/content
         [results]="results"
         [isInContainer]="true"
         [hideActions]="true"
+        [summaryOnly]="true"
+        [enableEntityNavigation]="false"
+        [showNewUploadButton]="false"
         (newUploadRequested)="onNewUploadRequested()"
         (contentNavigation)="onNavigationRequested($event)">
       </app-results>

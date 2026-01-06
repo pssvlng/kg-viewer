@@ -52,7 +52,8 @@ import { GraphsService, Graph, GraphAnalysisResponse } from '../../services/grap
       <app-results 
         *ngIf="analysisResults && !loading"
         [results]="analysisResults"
-        [hideActions]="true">
+        [hideActions]="true"
+        [showNewUploadButton]="false">
       </app-results>
     </mat-dialog-content>
   `,

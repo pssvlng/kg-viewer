@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, ViewChildren, ViewChild, QueryList, AfterViewInit } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, ViewChildren, ViewChild, QueryList, AfterViewInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, FormControl, ReactiveFormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -13,7 +13,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, timeout } from 'rxjs/operators';
 import { ServerSideDataSource, ServerSideDataSourceService } from '../../services/server-side-data-source.service';
 import { DocumentService } from '../../services/document.service';
 import { environment } from '../../../environments/environment';
@@ -49,7 +49,7 @@ export interface UploadInfo {
 export interface TabInfo {
   label: string;
   content: string;
-  type: 'text' | 'table' | 'summary';
+  type: 'text' | 'table' | 'summary' | 'search';
   data?: any[];
   uploadInfo?: UploadInfo;
 }
@@ -145,10 +145,130 @@ export interface TabInfo {
                     
                     <tr mat-header-row *matHeaderRowDef="['label', 'count']"></tr>
                     <tr mat-row *matRowDef="let row; columns: ['label', 'count']" 
-                        class="clickable-row" 
-                        (click)="navigateToEntityTab(row.label, row.instanceCount)"></tr>
+                        [class.clickable-row]="enableEntityNavigation"
+                        (click)="enableEntityNavigation ? navigateToEntityTab(row.label, row.instanceCount) : null"></tr>
                   </table>
                 </div>
+              </div>
+            </div>
+            
+            <!-- Search View -->
+            <div *ngIf="tab.type === 'search'" class="search-content">
+              <div class="search-header">
+                <mat-form-field appearance="outline" class="search-input">
+                  <mat-label>Search Knowledge Graph</mat-label>
+                  <input matInput 
+                         #searchInput
+                         placeholder="Search object literals..."
+                         (keyup.enter)="triggerSearch(tab, searchInput.value)">
+                  <button mat-icon-button 
+                          matSuffix 
+                          (click)="triggerSearch(tab, searchInput.value)"
+                          matTooltip="Search">
+                    <mat-icon>search</mat-icon>
+                  </button>
+                  <button mat-icon-button 
+                          matSuffix 
+                          (click)="clearSearch(tab, searchInput)"
+                          matTooltip="Clear"
+                          *ngIf="searchInput.value">
+                    <mat-icon>close</mat-icon>
+                  </button>
+                </mat-form-field>
+              </div>
+              
+              <!-- Loading Spinner -->
+              <div *ngIf="isSearchLoading(tab)" class="search-loading">
+                <mat-progress-spinner mode="indeterminate" diameter="50"></mat-progress-spinner>
+                <p>Searching, please be patient....</p>
+              </div>
+              
+              <!-- Search Results -->
+              <div *ngIf="hasSearchResults(tab) && !isSearchLoading(tab)" class="search-results">
+                <div class="table-container">
+                  <table mat-table 
+                         *ngIf="getSearchDataSource(tab)"
+                         [dataSource]="getSearchDataSource(tab)!" 
+                         class="search-table">
+                    
+                    <!-- Subject Column -->
+                    <ng-container matColumnDef="subject">
+                      <th mat-header-cell *matHeaderCellDef>Subject</th>
+                      <td mat-cell *matCellDef="let element">
+                        <a [href]="element.subject" 
+                           target="_blank"
+                           [matTooltip]="element.subject" 
+                           matTooltipPosition="above"
+                           class="truncated-uri clickable-link">
+                          {{ truncateUri(element.subject) }}
+                        </a>
+                      </td>
+                    </ng-container>
+                    
+                    <!-- Predicate Column -->
+                    <ng-container matColumnDef="predicate">
+                      <th mat-header-cell *matHeaderCellDef>Predicate</th>
+                      <td mat-cell *matCellDef="let element">
+                        <a [href]="element.predicate" 
+                           target="_blank"
+                           [matTooltip]="element.predicate" 
+                           matTooltipPosition="above"
+                           class="truncated-uri clickable-link">
+                          {{ truncateUri(element.predicate) }}
+                        </a>
+                      </td>
+                    </ng-container>
+                    
+                    <!-- Object Column -->
+                    <ng-container matColumnDef="object">
+                      <th mat-header-cell *matHeaderCellDef>Object</th>
+                      <td mat-cell *matCellDef="let element">
+                        <span [matTooltip]="element.object" 
+                              matTooltipPosition="above"
+                              class="truncated-uri">
+                          {{ truncateUri(element.object) }}
+                        </span>
+                      </td>
+                    </ng-container>
+                    
+                    <!-- Actions Column -->
+                    <ng-container matColumnDef="actions" *ngIf="!hideActions">
+                      <th mat-header-cell *matHeaderCellDef>Actions</th>
+                      <td mat-cell *matCellDef="let element">
+                        <button mat-icon-button 
+                                (click)="viewSearchResultGraph(element, tab)"
+                                matTooltip="View"
+                                matTooltipPosition="above"
+                                color="primary">
+                          <mat-icon>visibility</mat-icon>
+                        </button>
+                      </td>
+                    </ng-container>
+                    
+                    <tr mat-header-row *matHeaderRowDef="getSearchDisplayedColumns()"></tr>
+                    <tr mat-row *matRowDef="let row; columns: getSearchDisplayedColumns();"></tr>
+                  </table>
+                </div>
+                
+                <!-- Search Paginator -->
+                <mat-paginator 
+                  *ngIf="getSearchDataSource(tab) && !isSearchLoading(tab)"
+                  [length]="getSearchResultCount(tab)"
+                  [pageIndex]="getSearchPageIndex(tab)"
+                  [pageSize]="getSearchPageSize(tab)"
+                  [pageSizeOptions]="[25, 50, 100, 250]"
+                  (page)="onSearchPageChange($event, tab)"
+                  showFirstLastButtons>
+                </mat-paginator>
+                
+
+              </div>
+              
+              <!-- No results message -->
+              <div *ngIf="hasSearched(tab) && !hasSearchResults(tab) && !isSearchLoading(tab)" 
+                   class="no-results">
+                <mat-icon>search_off</mat-icon>
+                <p>No results found or request timed out.</p>
               </div>
             </div>
             
@@ -292,7 +412,7 @@ export interface TabInfo {
         </mat-tab-group>
       </mat-card-content>
       
-      <mat-card-actions *ngIf="!hideActions">
+      <mat-card-actions *ngIf="showNewUploadButton">
         <button mat-raised-button color="primary" (click)="newUpload()">
           <mat-icon>add</mat-icon>
           New Upload
@@ -448,12 +568,99 @@ export interface TabInfo {
       font-size: 14px;
       line-height: 1.4;
     }
+    
+    .search-content {
+      padding: 20px;
+    }
+    
+    .search-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    
+    .search-input {
+      width: 100%;
+      max-width: 600px;
+    }
+    
+    .search-input .mat-mdc-form-field-flex {
+      align-items: center;
+    }
+    
+    .search-results {
+      margin-top: 20px;
+    }
+    
+    .search-table {
+      width: 100%;
+    }
+    
+    .truncated-uri {
+      display: inline-block;
+      max-width: 250px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: monospace;
+      font-size: 0.9em;
+      color: #1976d2;
+    }
+    
+    .clickable-link {
+      text-decoration: none;
+      cursor: pointer;
+    }
+    
+    .clickable-link:hover {
+      text-decoration: underline;
+    }
+    
+    .no-results {
+      text-align: center;
+      padding: 40px 20px;
+      color: #666;
+    }
+    
+    .no-results mat-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+      color: #999;
+      margin-bottom: 10px;
+    }
+    
+    .search-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px;
+      color: #666;
+    }
+    
+    .search-loading mat-progress-spinner {
+      margin-bottom: 16px;
+    }
+    
+    .search-summary {
+      padding: 16px;
+      background-color: #f5f5f5;
+      border-radius: 4px;
+      margin-top: 16px;
+      text-align: center;
+      color: #666;
+      font-size: 14px;
+    }
   `]
 })
-export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, ContentNavigable {
+export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy, ContentNavigable {
   @Input() results: TabInfo[] = [];
   @Input() hideActions = false;
   @Input() isInContainer = false; // New flag to detect container usage
+  @Input() summaryOnly: boolean = false; // Only show summary tab
+  @Input() enableEntityNavigation: boolean = true; // Enable entity type clicking
+  @Input() showNewUploadButton: boolean = true; // Control New Upload button visibility
   @Output() newUploadRequested = new EventEmitter<void>();
   @Output() contentNavigation = new EventEmitter<ContentNavigationEvent>();
   @Output() viewEntityGraphRequested = new EventEmitter<any>();
@@ -461,6 +668,9 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, Conte
   tabs: TabInfo[] = [];
   dataSources = new Map<string, MatTableDataSource<any>>();
   serverDataSources = new Map<string, ServerSideDataSource>();
+  searchDataSources = new Map<string, MatTableDataSource<any>>();
+  searchStates = new Map<string, { hasSearched: boolean, lastSearchTerm?: string, isLoading?: boolean, pageIndex?: number, pageSize?: number }>();
+  searchLoadingSubscriptions = new Map<string, any>();
   displayedColumns = new Map<string, string[]>();
   filterControls = new Map<string, FormControl>();
   currentFilters = new Map<string, string>();
@@ -548,12 +758,25 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, Conte
   }
 
   private sortTabs(tabs: TabInfo[]): TabInfo[] {
-    // Separate tabs into two groups: owl# tabs and others
-    const owlTabs = tabs.filter(tab => tab.label.startsWith('owl#'));
-    const otherTabs = tabs.filter(tab => !tab.label.startsWith('owl#'));
+    const summaryTab = tabs.filter(tab => tab.type === 'summary');
     
-    // Return other tabs first, then owl# tabs
-    return [...otherTabs, ...owlTabs];
+    // If summaryOnly is true, return only summary tabs
+    if (this.summaryOnly) {
+      return summaryTab;
+    }
+    
+    const searchTab = tabs.filter(tab => tab.type === 'search');
+    const entityTabs = tabs.filter(tab => tab.type === 'table');
+    const owlTabs = tabs.filter(tab => tab.label.startsWith('owl#'));
+    const otherTabs = tabs.filter(tab => 
+      tab.type !== 'summary' && 
+      tab.type !== 'search' && 
+      tab.type !== 'table' && 
+      !tab.label.startsWith('owl#')
+    );
+    
+    // Return in new order: Summary → Search → Entity Types → Other → owl#
+    return [...summaryTab, ...searchTab, ...entityTabs, ...otherTabs, ...owlTabs];
   }
 
   trackByFn(index: number, item: TabInfo): string {
@@ -584,6 +807,9 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, Conte
         ).subscribe(filterValue => {
           this.applyFilter(filterValue || '', tab);
         });
+      } else if (tab.type === 'search') {
+        // Initialize search state for search tabs
+        this.searchStates.set(tab.label, { hasSearched: false, isLoading: false, pageIndex: 0, pageSize: 25 });
       }
     });
     
@@ -808,5 +1034,215 @@ LIMIT 1000`;
 
   newUpload() {
     this.newUploadRequested.emit();
+  }
+
+  // Search functionality methods - completely non-reactive, no state tracking
+  triggerSearch(tab: TabInfo, searchTerm?: string): void {
+    const term = searchTerm?.trim();
+    if (!term) {
+      console.log('No search term provided');
+      return;
+    }
+
+    console.log('Trigger search for term:', term);
+    this.performSearch(term, tab);
+  }
+
+  clearSearch(tab: TabInfo, inputElement?: HTMLInputElement): void {
+    console.log('Clearing search for tab:', tab.label);
+    
+    // Clear the input element if provided
+    if (inputElement) {
+      inputElement.value = '';
+    }
+    
+    // Clear search data and state
+    this.searchDataSources.delete(tab.label);
+    this.searchStates.set(tab.label, { 
+      hasSearched: false, 
+      lastSearchTerm: undefined,
+      pageIndex: 0,
+      pageSize: 25
+    });
+  }
+
+  performSearch(searchTerm: string, tab: TabInfo) {
+    if (!searchTerm.trim()) {
+      console.log('Empty search term, aborting');
+      return;
+    }
+
+    console.log('Starting search for term:', searchTerm);
+    
+    const graphName = this.extractGraphName(tab);
+    const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/search`;
+    
+    // Set loading state
+    this.searchStates.set(tab.label, { 
+      hasSearched: true, 
+      lastSearchTerm: searchTerm,
+      isLoading: true
+    });
+    
+    this.http.get<any>(url, {
+      params: { q: searchTerm }
+    }).pipe(
+      timeout(30000) // 30 second timeout
+    ).subscribe({
+      next: (response) => {
+        console.log('Search response:', response);
+        
+        // Create MatTableDataSource with results
+        const dataSource = new MatTableDataSource(response.results || []);
+        this.searchDataSources.set(tab.label, dataSource);
+        
+        // Update state
+        this.searchStates.set(tab.label, { 
+          hasSearched: true, 
+          lastSearchTerm: searchTerm,
+          isLoading: false,
+          pageIndex: 0,
+          pageSize: 25
+        });
+      },
+      error: (error) => {
+        console.error('Search error:', error);
+        this.searchDataSources.delete(tab.label);
+        this.searchStates.set(tab.label, { 
+          hasSearched: true, 
+          lastSearchTerm: searchTerm,
+          isLoading: false,
+          pageIndex: 0,
+          pageSize: 25
+        });
+      }
+    });
+  }
+
+  hasSearchResults(tab: TabInfo): boolean {
+    const dataSource = this.searchDataSources.get(tab.label);
+    return !!(dataSource && dataSource.data && dataSource.data.length > 0);
+  }
+
+  isSearchLoading(tab: TabInfo): boolean {
+    const searchState = this.searchStates.get(tab.label);
+    return searchState?.isLoading === true;
+  }
+
+  hasSearched(tab: TabInfo): boolean {
+    const state = this.searchStates.get(tab.label);
+    return state?.hasSearched || false;
+  }
+
+  getSearchResultCount(tab: TabInfo): number {
+    const dataSource = this.searchDataSources.get(tab.label);
+    return dataSource && dataSource.data ? dataSource.data.length : 0;
+  }
+
+  getSearchPageIndex(tab: TabInfo): number {
+    const searchState = this.searchStates.get(tab.label);
+    return searchState?.pageIndex || 0;
+  }
+
+  getSearchPageSize(tab: TabInfo): number {
+    const searchState = this.searchStates.get(tab.label);
+    return searchState?.pageSize || 25;
+  }
+
+  getTotalSearchResults(tab: TabInfo): number {
+    return this.getSearchResultCount(tab);
+  }
+
+  getSearchDataSource(tab: TabInfo): MatTableDataSource<any> | null {
+    const fullDataSource = this.searchDataSources.get(tab.label);
+    if (!fullDataSource) return null;
+    
+    // Get pagination state
+    const searchState = this.searchStates.get(tab.label);
+    const pageIndex = searchState?.pageIndex || 0;
+    const pageSize = searchState?.pageSize || 25;
+    
+    // Create a new data source with paginated data
+    const startIndex = pageIndex * pageSize;
+    const endIndex = startIndex + pageSize;
+    const paginatedData = fullDataSource.data.slice(startIndex, endIndex);
+    
+    const paginatedDataSource = new MatTableDataSource(paginatedData);
+    return paginatedDataSource;
+  }
+  
+  onSearchPageChange(event: PageEvent, tab: TabInfo) {
+    console.log('Search page change:', event);
+    const currentState = this.searchStates.get(tab.label);
+    if (currentState) {
+      this.searchStates.set(tab.label, {
+        ...currentState,
+        pageIndex: event.pageIndex,
+        pageSize: event.pageSize
+      });
+    }
+  }
+
+  getSearchDisplayedColumns(): string[] {
+    return this.hideActions ? ['subject', 'predicate', 'object'] : ['subject', 'predicate', 'object', 'actions'];
+  }
+
+  // Pagination is now handled automatically by MatPaginator + MatTableDataSource
+  
+  // Manual pagination for search results - implemented above in getSearchDataSource
+
+  viewSearchResultGraph(result: any, tab: TabInfo) {
+    // Navigate to graph view with subject as pivot entity
+    const element = {
+      uri: result.subject,
+      label: this.extractLabelFromUri(result.subject)
+    };
+    this.viewEntityGraph(element, tab);
+  }
+
+  truncateUri(uri: string): string {
+    if (!uri) return '';
+    
+    // For URIs longer than 50 characters, show first 47 characters + "..."
+    if (uri.length > 50) {
+      return uri.substring(0, 47) + '...';
+    }
+    
+    return uri;
+  }
+
+  private extractLabelFromUri(uri: string): string {
+    if (!uri) return 'Unknown';
+    
+    if (uri.includes('#')) {
+      const parts = uri.split('#');
+      return parts[parts.length - 1];
+    } else if (uri.includes('/')) {
+      const parts = uri.split('/');
+      return parts[parts.length - 1];
+    }
+    
+    return uri;
+  }
+  
+  ngOnDestroy() {
+    console.log('Component destroying, cleaning up subscriptions');
+    
+    // Clean up loading subscriptions
+    this.searchLoadingSubscriptions.forEach(subscription => {
+      if (subscription && !subscription.closed) {
+        subscription.unsubscribe();
+      }
+    });
+    this.searchLoadingSubscriptions.clear();
+    
+    // Clean up search data sources if needed
+    this.searchDataSources.forEach(dataSource => {
+      if (dataSource) {
+        dataSource.disconnect();
+      }
+    });
+    this.searchDataSources.clear();
+    this.searchStates.clear();
   }
 }

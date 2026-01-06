@@ -489,6 +489,14 @@ def create_analysis_tabs(analysis_data, graph_name, graph_uri, sparql_endpoint):
         'uploadInfo': upload_info
     })
     
+    # Create Search tab
+    tabs.append({
+        'label': 'Search',
+        'content': '',
+        'type': 'search',
+        'uploadInfo': upload_info
+    })
+    
     # Create detailed tabs for each class with instances
     try:
         for class_item in list(analysis_data.get('classList', [])):
@@ -1197,6 +1205,76 @@ def get_entity_graph(graph_name, entity_uri):
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/graphs/<graph_name>/search', methods=['GET'])
+def search_triple_store(graph_name):
+    """Search across the triple store with priority ranking - returns all results for frontend pagination"""
+    try:
+        search_term = request.args.get('q', '').strip()
+        if not search_term:
+            return jsonify({
+                'results': [],
+                'total': 0
+            })
+        
+        graph_uri = config.get_graph_uri(graph_name)
+        
+        # Escape search term for SPARQL
+        escaped_term = search_term.replace('\\', '\\\\').replace('"', '\\"')
+        
+        # Build search query with priority ordering and 10000 result limit
+        search_query = f"""
+        SELECT DISTINCT ?subject ?predicate ?object ?priority WHERE {{
+          GRAPH <{graph_uri}> {{
+            {{
+              # Priority 1: Exact matches in object literals
+              SELECT ?subject ?predicate ?object ("1" AS ?priority) WHERE {{
+                ?subject ?predicate ?object .
+                FILTER(isLiteral(?object) && STR(?object) = "{escaped_term}")
+              }}
+            }}
+            UNION
+            {{
+              # Priority 2: Contains matches in object literals
+              SELECT ?subject ?predicate ?object ("2" AS ?priority) WHERE {{
+                ?subject ?predicate ?object .
+                FILTER(isLiteral(?object) && CONTAINS(LCASE(STR(?object)), LCASE("{escaped_term}")) && STR(?object) != "{escaped_term}")
+              }}
+            }}
+          }}
+        }}
+        ORDER BY ?priority ?subject ?predicate ?object
+        LIMIT 10000
+        """
+        
+        # Execute search query
+        results = query_sparql(search_query)
+        
+        # Format results with priority
+        search_results = []
+        if results:
+            for result in results:
+                search_results.append({
+                    'subject': result['subject']['value'],
+                    'predicate': result['predicate']['value'], 
+                    'object': result['object']['value'],
+                    'priority': int(result['priority']['value'])
+                })
+        
+        return jsonify({
+            'results': search_results,
+            'total': len(search_results)
+        })
+        
+    except Exception as e:
+        print(f"Error in search_triple_store: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': str(e),
+            'results': [],
+            'total': 0
+        }), 500
 
 @app.route('/api/graphs/<graph_name>/entities/<path:entity_uri>/literals', methods=['GET'])
 def get_entity_literals(graph_name, entity_uri):
