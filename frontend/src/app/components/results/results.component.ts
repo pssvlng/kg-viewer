@@ -685,7 +685,6 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     private http: HttpClient,
     private documentService: DocumentService
   ) {
-    console.log('Results: Component constructor called');
   }
 
   ngAfterViewInit() {
@@ -986,14 +985,9 @@ LIMIT 1000`;
   }
 
   viewEntityGraph(element: any, tab: TabInfo) {
-    console.log('Results: viewEntityGraph called with isInContainer:', this.isInContainer);
-    console.log('Results: element:', element);
-    console.log('Results: tab:', tab);
-    
     const graphName = this.extractGraphName(tab);
     
     if (this.isInContainer) {
-      console.log('Results: Using container navigation approach');
       // Use container navigation - preserve current results state
       this.contentNavigation.emit({
         action: 'push',
@@ -1011,9 +1005,7 @@ LIMIT 1000`;
         title: `Graph: ${element.label || 'Entity'}`
       });
     } else {
-      console.log('Results: Using simple event emission approach');
       // Simple approach: emit event for parent component to handle visibility
-      console.log('Results: Emitting viewEntityGraphRequested event for:', element);
       this.viewEntityGraphRequested.emit({
         entityUri: element.uri,
         entityLabel: element.label,
@@ -1049,8 +1041,6 @@ LIMIT 1000`;
   }
 
   clearSearch(tab: TabInfo, inputElement?: HTMLInputElement): void {
-    console.log('Clearing search for tab:', tab.label);
-    
     // Clear the input element if provided
     if (inputElement) {
       inputElement.value = '';
@@ -1068,11 +1058,8 @@ LIMIT 1000`;
 
   performSearch(searchTerm: string, tab: TabInfo) {
     if (!searchTerm.trim()) {
-      console.log('Empty search term, aborting');
       return;
     }
-
-    console.log('Starting search for term:', searchTerm);
     
     const graphName = this.extractGraphName(tab);
     const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/search`;
@@ -1090,8 +1077,6 @@ LIMIT 1000`;
       timeout(30000) // 30 second timeout
     ).subscribe({
       next: (response) => {
-        console.log('Search response:', response);
-        
         // Create MatTableDataSource with results
         const dataSource = new MatTableDataSource(response.results || []);
         this.searchDataSources.set(tab.label, dataSource);

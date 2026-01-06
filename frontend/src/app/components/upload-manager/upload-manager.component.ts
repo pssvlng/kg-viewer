@@ -59,22 +59,16 @@ export class UploadManagerComponent implements OnInit {
   constructor() {}
 
   ngOnInit() {
-    console.log('UploadManager: Component initialized - this should appear immediately');
-    console.log('UploadManager: Initial state - results:', this.results);
   }
 
   onNavigationRequested(event: any) {
-    console.log('UploadManager: Navigation requested:', event);
-    
     if (event.action === 'showResults' && event.data) {
       // Handle showing results locally
-      console.log('UploadManager: Setting results from completed upload:', event.data);
       this.results = event.data;
       this.currentJobId = null;
       this.isUploading = false;
     } else if (event.action === 'goBack') {
       // Handle going back - reset to initial upload state
-      console.log('UploadManager: Going back to upload');
       this.results = null;
       this.currentJobId = null;
       this.isUploading = false;

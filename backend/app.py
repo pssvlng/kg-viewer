@@ -522,7 +522,7 @@ def create_analysis_tabs(analysis_data, graph_name, graph_uri, sparql_endpoint):
                     })
                     
     except Exception as e:
-        print(f"Error creating detailed class tabs: {e}")
+        app.logger.error(f"Error creating detailed class tabs: {e}")
     
     return tabs
 
@@ -575,7 +575,7 @@ def get_instance_data_from_sparql(class_uri, graph_uri):
         return instance_data
         
     except Exception as e:
-        print(f"Error getting instance data via SPARQL for {class_uri}: {e}")
+        app.logger.error(f"Error getting instance data via SPARQL for {class_uri}: {e}")
         return [{'label': 'Error', 'uri': 'No instance data available'}]
 
 @app.route('/upload_file', methods=['POST'])
@@ -669,7 +669,7 @@ def list_graphs():
             })
             
     except Exception as e:
-        print(f"Error listing graphs: {e}")
+        app.logger.error(f"Error listing graphs: {e}")
         return jsonify({
             'success': False,
             'error': f'Failed to list graphs: {str(e)}'
@@ -685,7 +685,7 @@ def delete_graph(graph_name):
         else:
             graph_uri = config.get_graph_uri(graph_name)
         
-        print(f"Attempting to delete graph: {graph_uri}")
+        app.logger.info(f"Attempting to delete graph: {graph_uri}")
         
         # First, check if the graph exists and get triple count
         count_query = f"""
@@ -737,14 +737,14 @@ def delete_graph(graph_name):
             )
             
             if response.status_code in [200, 204]:
-                print(f"Successfully deleted graph {graph_uri} with {triple_count} triples")
+                app.logger.info(f"Successfully deleted graph {graph_uri} with {triple_count} triples")
                 return jsonify({
                     'success': True,
                     'message': f'Graph "{graph_name}" deleted successfully',
                     'triples_deleted': triple_count
                 })
             else:
-                print(f"Failed to delete graph. Status: {response.status_code}, Response: {response.text}")
+                app.logger.error(f"Failed to delete graph. Status: {response.status_code}, Response: {response.text}")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to delete graph. Server response: {response.status_code}'
@@ -765,7 +765,7 @@ def delete_graph(graph_name):
                 }), 500
             
     except Exception as e:
-        print(f"Error deleting graph {graph_name}: {e}")
+        app.logger.error(f"Error deleting graph {graph_name}: {e}")
         return jsonify({
             'success': False,
             'error': f'Failed to delete graph: {str(e)}'
@@ -793,7 +793,7 @@ def create_graph_analysis_data(graph_uri, graph_name=None, graph=None, sparql_en
         return analyze_graph_via_sparql(graph_uri, endpoint_url, analysis_results)
         
     except Exception as e:
-        print(f"Error in create_graph_analysis_data: {e}")
+        app.logger.error(f"Error in create_graph_analysis_data: {e}")
         return {
             'error': str(e),
             'graphName': graph_name or 'Unknown',
@@ -946,7 +946,7 @@ def analyze_graph_via_sparql(graph_uri, sparql_endpoint, analysis_results):
         return analysis_results
         
     except Exception as e:
-        print(f"Error in SPARQL analysis: {e}")
+        app.logger.error(f"Error in SPARQL analysis: {e}")
         analysis_results['error'] = str(e)
         return analysis_results
 
@@ -981,7 +981,7 @@ def get_graph_analysis(graph_name):
         })
         
     except Exception as e:
-        print(f"Error analyzing graph {graph_name}: {e}")
+        app.logger.error(f"Error analyzing graph {graph_name}: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -1106,7 +1106,7 @@ def get_class_instances_paginated(graph_name, class_uri):
         })
         
     except Exception as e:
-        print(f"Error getting paginated instances for class {class_uri} in graph {graph_name}: {e}")
+        app.logger.error(f"Error getting paginated instances for class {class_uri} in graph {graph_name}: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -1267,7 +1267,7 @@ def search_triple_store(graph_name):
         })
         
     except Exception as e:
-        print(f"Error in search_triple_store: {e}")
+        app.logger.error(f"Error in search_triple_store: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({

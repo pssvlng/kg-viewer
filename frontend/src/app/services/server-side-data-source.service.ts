@@ -107,8 +107,6 @@ export class ServerSideDataSource extends DataSource<any> {
   }
 
   loadSearchData(graphName: string, searchTerm: string, page: number = 1, pageSize: number = 25) {
-    console.log('ServerSideDataSource: Starting search request', { graphName, searchTerm, page, pageSize });
-    
     // Cancel any ongoing request
     this.cancelCurrentRequest();
     
@@ -120,11 +118,9 @@ export class ServerSideDataSource extends DataSource<any> {
       .set('pageSize', pageSize.toString());
 
     const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/search`;
-    console.log('ServerSideDataSource: Making request to:', url, 'with params:', params.toString());
 
     this.currentRequest = this.http.get<any>(url, { params }).subscribe({
       next: (response) => {
-        console.log('ServerSideDataSource: Received response:', response);
         if (response && response.results) {
           this.dataSubject.next(response.results);
           this.paginationSubject.next({
@@ -135,14 +131,12 @@ export class ServerSideDataSource extends DataSource<any> {
             hasNext: response.page < response.totalPages,
             hasPrevious: response.page > 1
           });
-          console.log('ServerSideDataSource: Updated data and pagination');
         } else {
           this.dataSubject.next([]);
           console.error('Search returned error:', response?.error);
         }
         this.loadingSubject.next(false);
         this.currentRequest = null;
-        console.log('ServerSideDataSource: Loading completed');
       },
       error: (error) => {
         console.error('ServerSideDataSource: HTTP Error:', error);
