@@ -6,6 +6,8 @@ import { MatIconModule } from '@angular/material/icon';
 import { ContentContainerService } from '../../services/content-container.service';
 import { ContentFrame, ContentNavigable } from '../../services/content-navigation.interface';
 import { Subscription } from 'rxjs';
+import { GraphViewerComponent } from '../graph-viewer/graph-viewer.component';
+import { ResultsComponent } from '../results/results.component';
 
 @Component({
   selector: 'app-content-container',
@@ -18,31 +20,42 @@ import { Subscription } from 'rxjs';
   ],
   template: `
     <div class="content-container">
-      <!-- Header with back button (only shown when needed) -->
-            <!-- Content header with back button -->
-      <div class="content-header" *ngIf="currentFrame">
+      <!-- Content header with back button -->
+      <div class="content-header" *ngIf="currentComponentIndex > 0">
         <div class="header-content">
           <button 
             mat-raised-button
             color="primary"
             class="back-button"
             (click)="goBack()" 
-            *ngIf="currentFrame.canGoBack"
-            [attr.aria-label]="'Go back from ' + currentFrame.title">
+            aria-label="Go back">
             <mat-icon>arrow_back</mat-icon>
             Back
           </button>
-          <h3 class="content-title">{{ currentFrame?.title }}</h3>
+          <h3 class="content-title">{{ getCurrentTitle() }}</h3>
         </div>
       </div>
       
-      <!-- Dynamic content area -->
-      <div class="content-body">
-        <ng-container #contentHost></ng-container>
+      <!-- Original component (index 0) - GraphsViewer, etc. -->
+      <div class="content-body" 
+           [style.display]="currentComponentIndex === 0 ? 'block' : 'none'">
+        <ng-container #resultsHost></ng-container>
+      </div>
+      
+      <!-- Navigated results component (index 1) -->
+      <div class="content-body" 
+           [style.display]="currentComponentIndex === 1 ? 'block' : 'none'">
+        <ng-container #navigatedResultsHost></ng-container>
+      </div>
+      
+      <!-- Graph viewer component (index 2) -->
+      <div class="content-body" 
+           [style.display]="currentComponentIndex === 2 ? 'block' : 'none'">
+        <ng-container #graphHost></ng-container>
       </div>
       
       <!-- Placeholder when no content -->
-      <div *ngIf="!currentFrame" class="empty-container">
+      <div *ngIf="!hasContent" class="empty-container">
         <mat-icon>info</mat-icon>
         <p>No content to display</p>
       </div>
@@ -50,34 +63,35 @@ import { Subscription } from 'rxjs';
   `,
   styles: [`
     .content-container {
+      height: 100%;
       display: flex;
       flex-direction: column;
-      height: 100%;
-      min-height: 400px;
     }
 
     .content-header {
+      background: #f5f5f5;
       border-bottom: 1px solid #e0e0e0;
-      padding: 16px;
-      background-color: #fafafa;
-      flex-shrink: 0;
+      padding: 0;
     }
 
     .header-content {
       display: flex;
       align-items: center;
-      gap: 12px;
-    }
-
-    .back-button {
-      color: #1976d2;
+      padding: 16px;
+      gap: 16px;
     }
 
     .content-title {
       margin: 0;
-      font-size: 1.2rem;
+      flex: 1;
+      font-size: 18px;
       font-weight: 500;
-      color: #333;
+    }
+
+    .back-button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .content-body {
@@ -106,11 +120,26 @@ import { Subscription } from 'rxjs';
 })
 export class ContentContainerComponent implements OnInit, OnDestroy {
   @Input() containerId!: string;
-  @ViewChild('contentHost', { read: ViewContainerRef }) contentHost!: ViewContainerRef;
+  @ViewChild('resultsHost', { read: ViewContainerRef }) resultsHost!: ViewContainerRef;
+  @ViewChild('navigatedResultsHost', { read: ViewContainerRef }) navigatedResultsHost!: ViewContainerRef;
+  @ViewChild('graphHost', { read: ViewContainerRef }) graphHost!: ViewContainerRef;
 
-  currentFrame: ContentFrame | null = null;
+  // Index-based component management
+  currentComponentIndex = 0;  // 0: original, 1: navigated results, 2: graph view
+  hasContent = false;
+  
+  // Track titles for each index
+  private componentTitles: string[] = ['', '', ''];
+  
+  // Track original component for back navigation
+  private originalComponentRef: ComponentRef<any> | null = null;
+  
+  // Component references
+  private resultsComponentRef: ComponentRef<any> | null = null;
+  private navigatedResultsComponentRef: ComponentRef<any> | null = null;
+  private graphComponentRef: ComponentRef<any> | null = null;
+  
   private subscription = new Subscription();
-  private currentComponentRef: ComponentRef<any> | null = null;
 
   constructor(private contentService: ContentContainerService) {}
 
@@ -120,18 +149,14 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Create stack for this container
+    // Create stack for this container to maintain compatibility with existing service
     this.contentService.createStack(this.containerId);
 
-    // Subscribe to stack updates
+    // Subscribe to stack updates to get initial results component
     this.subscription.add(
       this.contentService.getStackUpdates(this.containerId).subscribe(stack => {
-        if (stack && stack.currentIndex >= 0) {
-          this.currentFrame = stack.frames[stack.currentIndex];
-          this.renderCurrentFrame();
-        } else {
-          this.currentFrame = null;
-          this.clearContent();
+        if (stack && stack.frames.length > 0 && !this.resultsComponentRef) {
+          this.initializeResultsComponent(stack.frames[0]);
         }
       })
     );
@@ -139,95 +164,147 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
 
   ngOnDestroy() {
     this.subscription.unsubscribe();
-    this.clearContent();
+    this.clearComponents();
+  }
+
+  private initializeResultsComponent(frame: ContentFrame) {
+    if (!this.resultsHost || this.resultsComponentRef) return;
+    
+    // Create initial component (can be Results, GraphsViewer, etc.)
+    this.resultsComponentRef = this.resultsHost.createComponent(frame.component);
+    
+    // Store reference to original component for back navigation
+    this.originalComponentRef = this.resultsComponentRef;
+    
+    // Pass data to component
+    if (frame.data) {
+      Object.assign(this.resultsComponentRef.instance, frame.data);
+    }
+    
+    // Wire up navigation events
+    if (this.isContentNavigable(this.resultsComponentRef.instance)) {
+      this.resultsComponentRef.instance.contentNavigation?.subscribe((event: any) => {
+        this.handleNavigationEvent(event);
+      });
+    }
+    
+    this.resultsComponentRef.changeDetectorRef.detectChanges();
+    this.hasContent = true;
+    
+    // Set initial state - index 0 for original component
+    this.currentComponentIndex = 0;
+    this.componentTitles[0] = frame.title || 'Initial View';
+  }
+
+  getCurrentTitle(): string {
+    return this.componentTitles[this.currentComponentIndex] || '';
   }
 
   goBack() {
-    this.contentService.goBack(this.containerId);
+    if (this.currentComponentIndex > 0) {
+      this.currentComponentIndex--;
+    }
   }
 
-  private renderCurrentFrame() {
-    if (!this.currentFrame || !this.contentHost) return;
-
-    this.clearContent();
+  private handleNavigationEvent(event: any) {
+    console.log('Navigation event received:', event);
     
-    // Create component dynamically
-    this.currentComponentRef = this.contentHost.createComponent(this.currentFrame.component);
-    
-    // Pass data to component if available - BEFORE change detection
-    if (this.currentFrame.data) {
-      Object.assign(this.currentComponentRef.instance, this.currentFrame.data);
-      
-      // Force trigger any necessary updates after data assignment
-      if (typeof this.currentComponentRef.instance.onDataAssigned === 'function') {
-        this.currentComponentRef.instance.onDataAssigned();
+    if (event.action === 'push') {
+      if (event.component === GraphViewerComponent) {
+        // Show graph viewer
+        this.showGraphViewer(event.data, event.title);
+      } else if (event.component === ResultsComponent) {
+        // Replace current results component with new results data
+        this.showResultsComponent(event.data, event.title);
       }
     }
-
-    // Wire up navigation if component implements ContentNavigable
-    if (this.isContentNavigable(this.currentComponentRef.instance)) {
-      this.currentComponentRef.instance.contentNavigation?.subscribe((event: any) => {
-        this.handleContentNavigation(event);
-      });
-    }
-
-    // Trigger change detection
-    this.currentComponentRef.changeDetectorRef.detectChanges();
   }
 
-  private clearContent() {
-    if (this.currentComponentRef) {
-      this.currentComponentRef.destroy();
-      this.currentComponentRef = null;
+  private showResultsComponent(data: any, title?: string) {
+    // Clear existing navigated results
+    if (this.navigatedResultsComponentRef) {
+      this.navigatedResultsComponentRef.destroy();
+      this.navigatedResultsComponentRef = null;
     }
-    if (this.contentHost) {
-      this.contentHost.clear();
+
+    // Create new ResultsComponent in the navigated results container
+    if (this.navigatedResultsHost) {
+      this.navigatedResultsComponentRef = this.navigatedResultsHost.createComponent(ResultsComponent);
+      
+      // Pass data to results component
+      if (data) {
+        Object.assign(this.navigatedResultsComponentRef.instance, data);
+      }
+      
+      // Wire up navigation for graph viewing from results
+      if (this.isContentNavigable(this.navigatedResultsComponentRef.instance)) {
+        this.navigatedResultsComponentRef.instance.contentNavigation?.subscribe((event: any) => {
+          this.handleNavigationEvent(event);
+        });
+      }
+      
+      this.navigatedResultsComponentRef.changeDetectorRef.detectChanges();
     }
+    
+    // Navigate to index 1 (navigated results)
+    this.currentComponentIndex = 1;
+    this.componentTitles[1] = title || 'Results';
+  }
+
+  private showGraphViewer(data: any, title?: string) {
+    // Always destroy and recreate graph viewer to ensure fresh data
+    if (this.graphComponentRef) {
+      this.graphComponentRef.destroy();
+      this.graphComponentRef = null;
+    }
+    
+    // Create fresh graph viewer component
+    if (this.graphHost) {
+      this.graphComponentRef = this.graphHost.createComponent(GraphViewerComponent);
+      
+      // Pass data to graph viewer BEFORE setting up navigation
+      if (data) {
+        Object.assign(this.graphComponentRef.instance, data);
+      }
+      
+      // Wire up back navigation - listen to the contentNavigation event
+      if (this.isContentNavigable(this.graphComponentRef.instance)) {
+        this.graphComponentRef.instance.contentNavigation?.subscribe((event: any) => {
+          if (event.action === 'back') {
+            // Simply go back one index
+            this.goBack();
+          }
+        });
+      }
+      
+      // Trigger change detection and component initialization
+      this.graphComponentRef.changeDetectorRef.detectChanges();
+    }
+    
+    // Navigate to index 2 (graph view)
+    this.currentComponentIndex = 2;
+    this.componentTitles[2] = title || 'Graph View';
+  }
+
+  private clearComponents() {
+    if (this.resultsComponentRef) {
+      this.resultsComponentRef.destroy();
+      this.resultsComponentRef = null;
+    }
+    if (this.navigatedResultsComponentRef) {
+      this.navigatedResultsComponentRef.destroy();
+      this.navigatedResultsComponentRef = null;
+    }
+    if (this.graphComponentRef) {
+      this.graphComponentRef.destroy();
+      this.graphComponentRef = null;
+    }
+    this.originalComponentRef = null;
+    this.currentComponentIndex = 0;
+    this.componentTitles = ['', '', ''];
   }
 
   private isContentNavigable(instance: any): instance is ContentNavigable {
     return instance && typeof instance.contentNavigation?.subscribe === 'function';
-  }
-
-  private handleContentNavigation(event: any) {
-    switch (event.action) {
-      case 'push':
-        this.contentService.pushContent(this.containerId, {
-          component: event.component,
-          data: event.data,
-          title: event.title
-        });
-        break;
-      case 'replace':
-        this.contentService.replaceStack(this.containerId, {
-          component: event.component,
-          data: event.data,
-          title: event.title
-        });
-        break;
-      case 'back':
-        // If there's restore state data, update the frame before going back
-        if (event.data?.restoreState) {
-          const stack = this.contentService.getStack(this.containerId);
-          if (stack && stack.currentIndex > 0) {
-            const previousFrame = stack.frames[stack.currentIndex - 1];
-            console.log('Restoring state to previous frame:', event.data.restoreState);
-            console.log('Previous frame data before merge:', previousFrame.data);
-            
-            // Merge the restore state into the previous frame's data
-            // Extract the actual properties from the restoreState object
-            const restoreData = event.data.restoreState;
-            previousFrame.data = { 
-              ...previousFrame.data, 
-              // Spread the properties from restoreState (e.g. results, currentTabIndex)
-              ...(restoreData || {})
-            };
-            
-            console.log('Previous frame data after merge:', previousFrame.data);
-          }
-        }
-        this.goBack();
-        break;
-    }
   }
 }

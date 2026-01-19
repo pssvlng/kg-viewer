@@ -30,6 +30,10 @@ declare var cytoscape: any;
       <div class="graph-header">
         <h3>{{ entityLabel || 'Entity Graph' }}</h3>
         <div class="graph-controls">
+          <button mat-button (click)="resetGraph()" matTooltip="Reset to original state">
+            <mat-icon>refresh</mat-icon>
+            Reset
+          </button>
           <button mat-button (click)="zoomIn()" matTooltip="Zoom In">
             <mat-icon>zoom_in</mat-icon>
           </button>
@@ -288,6 +292,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   @Input() entityLabel!: string;
   @Input() graphName!: string;
   @Input() isInContainer: boolean = false;
+  @Input() preserveState: any = null; // State to preserve for back navigation
   @Output() contentNavigation = new EventEmitter<ContentNavigationEvent>();
   @Output() backRequested = new EventEmitter<void>();
   @ViewChild('cytoscapeContainer', { static: false }) cytoscapeContainer!: ElementRef;
@@ -304,6 +309,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   expandedNodesData = new Map<string, any>(); // Store original expansion data
   includeBidirectionalRelationships = false;
   lastSelectedNode: string | null = null; // Track last clicked node for orange color
+  originalEntityUri: string = ''; // Track original entity for reset functionality
 
   // Cytoscape configuration
   layout = {
@@ -395,6 +401,8 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
   ngOnInit() {
     console.log('GraphViewer: ngOnInit called with entityUri:', this.entityUri, 'isInContainer:', this.isInContainer);
+    // Store original entity URI for reset functionality
+    this.originalEntityUri = this.entityUri || '';
     this.loadGraph();
   }
 
@@ -1104,8 +1112,48 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     this.loadGraph(2); // Load with depth 2
   }
 
+  resetGraph() {
+    // Reset to initial state with original entity while preserving zoom/pan
+    this.expandedNodes.clear();
+    this.expandedNodesData.clear();
+    this.lastSelectedNode = null;
+    
+    if (this.originalEntityUri && this.cy) {
+      // Store current zoom and pan settings
+      const currentZoom = this.cy.zoom();
+      const currentPan = this.cy.pan();
+      
+      // Reset entity URI and reload graph
+      this.entityUri = this.originalEntityUri;
+      this.loadGraph(1);
+      
+      // Restore zoom and pan settings after a short delay
+      setTimeout(() => {
+        if (this.cy) {
+          this.cy.zoom(currentZoom);
+          this.cy.pan(currentPan);
+        }
+      }, 100);
+    } else if (this.originalEntityUri) {
+      // Fallback if cy is not available
+      this.entityUri = this.originalEntityUri;
+      this.loadGraph(1);
+    }
+  }
+
   goBack() {
-    this.backRequested.emit();
+    if (this.isInContainer) {
+      // Use content navigation with restore state
+      this.contentNavigation.emit({
+        action: 'back',
+        data: {
+          restoreState: this.preserveState
+        }
+      });
+    } else {
+      // Fallback for simple parent-child relationship
+      this.backRequested.emit();
+    }
   }
 
   getUriFragment(uri: string): string {

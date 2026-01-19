@@ -661,6 +661,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   @Input() summaryOnly: boolean = false; // Only show summary tab
   @Input() enableEntityNavigation: boolean = true; // Enable entity type clicking
   @Input() showNewUploadButton: boolean = true; // Control New Upload button visibility
+  @Input() restoreState: any = null; // State to restore when coming back from navigation
   @Output() newUploadRequested = new EventEmitter<void>();
   @Output() contentNavigation = new EventEmitter<ContentNavigationEvent>();
   @Output() viewEntityGraphRequested = new EventEmitter<any>();
@@ -686,6 +687,8 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     private documentService: DocumentService
   ) {
   }
+
+
 
   ngAfterViewInit() {
     // Connect paginators and sorts to data sources after view initialization
@@ -746,6 +749,12 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   }
 
   ngOnChanges(changes: SimpleChanges) {
+    // Handle state restoration when coming back from navigation
+    if (changes['restoreState'] && this.restoreState?.currentTabIndex !== undefined) {
+      this.restoreTabState(this.restoreState.currentTabIndex);
+    }
+    
+    // Handle results changes
     if (changes['results']) {
       this.updateTabs();
     }
@@ -1015,8 +1024,16 @@ LIMIT 1000`;
   }
 
   private getCurrentTabIndex(): number {
-    // Try to get the current active tab index if possible
-    return 0; // Default to first tab
+    return this.tabGroup?.selectedIndex ?? 0;
+  }
+
+  private restoreTabState(tabIndex: number) {
+    if (this.tabGroup && tabIndex >= 0 && tabIndex < this.results.length) {
+      // Use setTimeout to ensure view is updated
+      setTimeout(() => {
+        this.tabGroup.selectedIndex = tabIndex;
+      }, 0);
+    }
   }
 
   private extractGraphName(tab: TabInfo): string {
