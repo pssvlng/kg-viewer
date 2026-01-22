@@ -395,12 +395,9 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   constructor(
     private graphService: GraphVisualizationService,
     private cd: ChangeDetectorRef
-  ) {
-    console.log('GraphViewer: Constructor called');
-  }
+  ) {}
 
   ngOnInit() {
-    console.log('GraphViewer: ngOnInit called with entityUri:', this.entityUri, 'isInContainer:', this.isInContainer);
     // Store original entity URI for reset functionality
     this.originalEntityUri = this.entityUri || '';
     this.loadGraph();
@@ -439,7 +436,6 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         this.onNodeHover(evt);
       });
 
-      console.log('Cytoscape initialized successfully with elements:', this.graphElements);
       
       // Fit and center the graph
       setTimeout(() => {
@@ -468,7 +464,6 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
                   }))
                 };
                 this.expandedNodesData.set(this.entityUri, normalizedData);
-                console.log('Stored initial central node expansion data with depth 1');
               },
               error: (err) => {
                 console.error('Error storing initial central data:', err);
@@ -504,13 +499,11 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   }
 
   private createCytoscapeElements(data: GraphData): any[] {
-    console.log('Creating Cytoscape elements from data:', data);
     const elements: any[] = [];
 
     // Add nodes
     data.nodes.forEach(node => {
       const isCentral = node.isCentral === true || node.uri === this.entityUri;
-      console.log(`Creating node: ${node.uri}, isCentral: ${isCentral}, entityUri: ${this.entityUri}`);
       
       elements.push({
         data: {
@@ -539,13 +532,10 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       });
     });
 
-    console.log('Created elements:', elements);
     return elements;
   }  onNodeClick(event: any) {
     const nodeUri = event.target.data('uri');
     const nodeLabel = event.target.data('label');
-    
-    console.log('Node clicked:', nodeUri);
     
     // Clear previous selection
     if (this.cy) {
@@ -569,7 +559,6 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   expandNodeConnections(nodeUri: string) {
     // Don't expand the central node - its connections are already loaded
     if (nodeUri === this.entityUri) {
-      console.log('Skipping expansion of central node:', nodeUri);
       // Just mark it as expanded for tracking purposes
       this.expandedNodes.add(nodeUri);
       // Update the visual state (central stays red due to CSS priority)
@@ -584,22 +573,13 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
     // Check if this node has already been expanded
     if (this.expandedNodes.has(nodeUri)) {
-      console.log('Node already expanded:', nodeUri);
       return;
     }
-
-    console.log('Expanding graph for node:', nodeUri);
     
     // Load connected nodes for the clicked node (depth=1 for single level expansion)
     this.graphService.getEntityGraph(this.graphName, nodeUri, 1)
       .subscribe({
         next: (newGraphData) => {
-          console.log('Received expansion data for node:', nodeUri);
-          console.log('New nodes:', newGraphData.nodes.length);
-          console.log('New edges:', newGraphData.edges.length);
-          console.log('Current graph has nodes:', this.cy.nodes().length);
-          console.log('Current graph has edges:', this.cy.edges().length);
-          
           // Store the original expansion data with consistent node structure
           const normalizedData = {
             ...newGraphData,
@@ -616,13 +596,10 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
           };
           
           this.expandedNodesData.set(nodeUri, normalizedData);
-          console.log('Stored expansion data for:', nodeUri);
           
           // Filter based on bidirectional setting
           const filteredGraphData = this.filterGraphData(normalizedData, nodeUri);
-          
-          console.log('Filtered edges (outward only):', filteredGraphData.edges.length);
-          console.log('Filtered nodes (connected only):', filteredGraphData.nodes.length);
+                    
           this.mergeGraphData(filteredGraphData, nodeUri);
         },
         error: (err) => {
@@ -671,7 +648,6 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
             expanded: false
           }
         });
-        console.log('Adding new node:', node.label);
       }
     });
 
@@ -707,16 +683,10 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         existingEdgePairs.add(edgePair2);
         existingEdgePairs.add(edgePairWithUri1);
         existingEdgePairs.add(edgePairWithUri2);
-        
-        console.log('Adding new edge:', edge.label, 'from', edge.source, 'to', edge.target);
-      } else {
-        console.log('Skipping duplicate edge:', edge.label, 'from', edge.source, 'to', edge.target);
       }
     });
 
     if (elementsToAdd.length > 0) {
-      console.log('Adding elements to graph:', elementsToAdd);
-      
       // Add new elements to cytoscape
       this.cy.add(elementsToAdd);
       
@@ -724,10 +694,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       this.expandedNodes.add(expandedNodeUri);
       const expandedNode = this.cy.getElementById(expandedNodeUri);
       if (expandedNode.length > 0) {
-        console.log(`Marking node ${expandedNodeUri} as expanded`);
-        console.log(`Node data before:`, expandedNode.data());
         expandedNode.data('expanded', 'true');
-        console.log(`Node data after:`, expandedNode.data());
       }
       
       // Run layout to position new nodes
@@ -742,10 +709,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         edgeElasticity: 100
       });
       layout.run();
-      
-      console.log(`Added ${elementsToAdd.length} new elements to the graph`);
     } else {
-      console.log('No new elements to add');
       // Still mark as expanded even if no new nodes were found
       this.expandedNodes.add(expandedNodeUri);
       const expandedNode = this.cy.getElementById(expandedNodeUri);
@@ -937,8 +901,6 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   }
 
   filterGraphData(graphData: any, expandedNodeUri: string) {
-    console.log(`Filtering graph data for node: ${expandedNodeUri}, bidirectional: ${this.includeBidirectionalRelationships}`);
-    console.log('Original data:', graphData);
     
     if (this.includeBidirectionalRelationships) {
       // Include all connections (bidirectional) but only direct connections of the expanded node

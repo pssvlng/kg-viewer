@@ -234,7 +234,10 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
     private graphsService: GraphsService,
     private dialog: MatDialog,
     private snackBar: MatSnackBar
-  ) {}
+  ) {
+    // Initialize with empty array to prevent filter errors
+    this.dataSource.data = [];
+  }
 
   ngOnInit() {
     this.loadGraphs();
@@ -274,16 +277,19 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
   loadGraphs() {
     this.graphsService.getGraphs().subscribe({
       next: (response) => {
-        if (response.success) {
+        console.log('Graphs API response:', response);
+        if (response.success && Array.isArray(response.graphs)) {
           this.graphs = response.graphs;
           this.dataSource.data = this.graphs;
+          console.log('Loaded graphs:', this.graphs);
         } else {
+          console.error('Invalid response format:', response);
           this.snackBar.open('Failed To Load Graphs', 'Close', { duration: 3000 });
         }
       },
       error: (error) => {
         console.error('Error loading graphs:', error);
-        this.snackBar.open('Error Loading Graphs', 'Close', { duration: 3000 });
+        this.snackBar.open(`Error Loading Graphs: ${error.message || error}`, 'Close', { duration: 3000 });
       }
     });
   }

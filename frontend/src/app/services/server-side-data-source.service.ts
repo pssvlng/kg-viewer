@@ -77,17 +77,26 @@ export class ServerSideDataSource extends DataSource<any> {
     this.loadingSubject.next(true);
 
     const params = new HttpParams()
-      .set('page', page.toString())
-      .set('pageSize', pageSize.toString())
-      .set('filter', filter);
+      .set('page', (page - 1).toString()) // Convert to 0-based page number for API
+      .set('size', pageSize.toString())
+      .set('search', filter);
 
-    const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/class/${encodeURIComponent(classUri)}/instances`;
+    const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/entities/${encodeURIComponent(classUri)}/instances`;
 
-    this.http.get<PaginatedResponse>(url, { params }).subscribe({
+    this.http.get<any>(url, { params }).subscribe({
       next: (response) => {
         if (response.success) {
-          this.dataSubject.next(response.data);
-          this.paginationSubject.next(response.pagination);
+          this.dataSubject.next(response.data || []);
+          // Convert API response to our pagination format
+          const pagination: PaginationInfo = {
+            page: (response.number || 0) + 1, // Convert back to 1-based
+            pageSize: response.size || pageSize,
+            totalItems: response.totalElements || 0,
+            totalPages: response.totalPages || 0,
+            hasNext: (response.number + 1) < response.totalPages,
+            hasPrevious: response.number > 0
+          };
+          this.paginationSubject.next(pagination);
         } else {
           this.dataSubject.next([]);
           console.error('Server returned error:', response.error);
@@ -117,7 +126,7 @@ export class ServerSideDataSource extends DataSource<any> {
       .set('page', page.toString())
       .set('pageSize', pageSize.toString());
 
-    const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/search`;
+    const url = `${environment.apiUrl}/api/v2/graphs/${encodeURIComponent(graphName)}/search`;
 
     this.currentRequest = this.http.get<any>(url, { params }).subscribe({
       next: (response) => {

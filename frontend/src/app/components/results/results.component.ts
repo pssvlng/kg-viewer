@@ -99,55 +99,66 @@ export interface TabInfo {
                 </div>
                 
                 <div class="result-item">
-                  <strong>Graph Name:</strong> 
-                  <code>{{ tab.uploadInfo?.graphId }}</code>
+                  <strong>Graph Name:</strong> {{ tab.uploadInfo?.graphName }}
                 </div>
                 
                 <div class="result-item">
                   <strong>Graph URI:</strong> 
-                  <code>{{ tab.uploadInfo?.graphUri }}</code>
+                  <a [href]="tab.uploadInfo?.graphUri" target="_blank" class="graph-link">{{ tab.uploadInfo?.graphUri }}</a>
                 </div>
                 
                 <div class="result-item">
-                  <strong>Number of Triples:</strong> 
-                  <span class="count">{{ tab.uploadInfo?.triplesCount }}</span>
+                  <strong>Total Triples:</strong> {{ tab.uploadInfo?.triplesCount | number }}
                 </div>
                 
                 <div class="result-item">
                   <strong>SPARQL Endpoint:</strong> 
-                  <a [href]="getSparqlQueryUrl(tab.uploadInfo)" target="_blank">{{ getPublicSparqlEndpoint(tab.uploadInfo?.sparqlEndpoint) }}</a>
+                  <a [href]="getSparqlQueryUrl(tab.uploadInfo)" target="_blank" class="sparql-link">{{ getPublicSparqlEndpoint(tab.uploadInfo?.sparqlEndpoint) }}</a>
+                </div>
+              </div>
+              
+              <!-- Analysis Results Section -->
+              <div *ngIf="tab.uploadInfo?.analysisResults" class="analysis-summary">
+                <h4>Analysis Results</h4>
+                
+                <div class="analysis-stats">
+                  <div class="stat-item">
+                    <strong>Total Triples:</strong> {{ tab.uploadInfo?.analysisResults?.totalTriples | number }}
+                  </div>
+                  
+                  <div class="stat-item">
+                    <strong>Entity Types Found:</strong> {{ tab.uploadInfo?.analysisResults?.foundClassesCount }}
+                  </div>
                 </div>
                 
-              </div>
-              
-              <div class="content-text">
-                <pre>{{ tab.content }}</pre>
-              </div>
-              
-              <!-- Classes Overview Table -->
-              <div *ngIf="tab.uploadInfo?.classesOverview?.length" class="classes-overview">
-                <h4>Entity Types Summary</h4>
-                <p><strong>Total Entity Types:</strong> {{ tab.uploadInfo?.classesOverview?.length }}</p>
-                <p><strong>Total Entities:</strong> {{ getTotalEntities(tab.uploadInfo?.classesOverview || []) }}</p>
-                <div class="table-container">
-                  <table mat-table [dataSource]="getClassesDataSource(tab.uploadInfo?.classesOverview || [])" class="classes-table">
-                    <ng-container matColumnDef="label">
-                      <th mat-header-cell *matHeaderCellDef>Entity Type</th>
-                      <td mat-cell *matCellDef="let element">
-                        <strong>{{ element.label }}</strong>
-                      </td>
-                    </ng-container>
-                    
-                    <ng-container matColumnDef="count">
-                      <th mat-header-cell *matHeaderCellDef>Count</th>
-                      <td mat-cell *matCellDef="let element">{{ element.instanceCount }}</td>
-                    </ng-container>
-                    
-                    <tr mat-header-row *matHeaderRowDef="['label', 'count']"></tr>
-                    <tr mat-row *matRowDef="let row; columns: ['label', 'count']" 
-                        [class.clickable-row]="enableEntityNavigation"
-                        (click)="enableEntityNavigation ? navigateToEntityTab(row.label, row.instanceCount) : null"></tr>
-                  </table>
+                <!-- Entity Types Overview -->
+                <div *ngIf="tab.uploadInfo?.analysisResults?.classList" class="classes-overview">
+                  <h5>Entity Types Overview</h5>
+                  <div class="table-container">
+                    <table mat-table [dataSource]="getEntityTypesDataSource(tab.uploadInfo?.analysisResults?.classList || [])" 
+                           class="classes-table">
+                      
+                      <!-- Entity Name Column -->
+                      <ng-container matColumnDef="name">
+                        <th mat-header-cell *matHeaderCellDef>Entity Type</th>
+                        <td mat-cell *matCellDef="let element"
+                            [class.clickable-row]="enableEntityNavigation"
+                            (click)="enableEntityNavigation && navigateToEntityType(element.label, element.instanceCount)">
+                          {{ element.label }}
+                        </td>
+                      </ng-container>
+                      
+                      <!-- Instance Count Column -->
+                      <ng-container matColumnDef="count">
+                        <th mat-header-cell *matHeaderCellDef>Instances</th>
+                        <td mat-cell *matCellDef="let element">{{ element.instanceCount | number }}</td>
+                      </ng-container>
+                      
+                      <tr mat-header-row *matHeaderRowDef="['name', 'count']"></tr>
+                      <tr mat-row *matRowDef="let row; columns: ['name', 'count'];"
+                          [class.clickable-row]="enableEntityNavigation"></tr>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
@@ -351,7 +362,7 @@ export interface TabInfo {
                   <ng-container matColumnDef="label">
                     <th mat-header-cell *matHeaderCellDef>Label</th>
                     <td mat-cell *matCellDef="let element">
-                      <strong>{{ element.label || 'N/A' }}</strong>
+                      <strong>{{ element.label || element.instanceLabel || 'N/A' }}</strong>
                     </td>
                   </ng-container>
                   
@@ -359,8 +370,13 @@ export interface TabInfo {
                   <ng-container matColumnDef="uri">
                     <th mat-header-cell *matHeaderCellDef>URI</th>
                     <td mat-cell *matCellDef="let element">
-                      <a [href]="element.uri" target="_blank" 
-                         class="uri-link">{{ element.uri }}</a>
+                      <a [href]="element.uri || element.instance" 
+                         target="_blank" 
+                         [matTooltip]="element.uri || element.instance" 
+                         matTooltipPosition="above"
+                         class="uri-link truncated-uri">
+                        {{ truncateUri(element.uri || element.instance) }}
+                      </a>
                     </td>
                   </ng-container>
                   
@@ -470,7 +486,7 @@ export interface TabInfo {
       border-top: 1px solid #e0e0e0;
     }
     
-    .classes-overview h4 {
+    .classes-overview h4, .classes-overview h5 {
       margin-bottom: 10px;
       color: #1976d2;
     }
@@ -480,12 +496,16 @@ export interface TabInfo {
       margin-top: 15px;
     }
     
+    .classes-table .mat-mdc-row {
+      transition: background-color 0.2s ease;
+    }
+    
     .clickable-row {
       cursor: pointer;
     }
     
     .clickable-row:hover {
-      background-color: #f5f5f5;
+      background-color: #f5f5f5 !important;
     }
     
     .table-content {
@@ -761,11 +781,19 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   }
 
   updateTabs() {
-    this.tabs = this.sortTabs(this.results || []);
+    // Ensure results is an array before processing
+    const resultsArray = Array.isArray(this.results) ? this.results : [];
+    this.tabs = this.sortTabs(resultsArray);
     this.initializeDataSources();
   }
 
   private sortTabs(tabs: TabInfo[]): TabInfo[] {
+    // Safety check: ensure tabs is an array
+    if (!Array.isArray(tabs)) {
+      console.warn('sortTabs received non-array:', tabs);
+      return [];
+    }
+    
     const summaryTab = tabs.filter(tab => tab.type === 'summary');
     
     // If summaryOnly is true, return only summary tabs
@@ -785,6 +813,26 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     
     // Return in new order: Summary → Search → Entity Types → Other → owl#
     return [...summaryTab, ...searchTab, ...entityTabs, ...otherTabs, ...owlTabs];
+  }
+
+  navigateToEntityType(entityLabel: string, instanceCount?: number) {
+    // Find the tab for this entity type and switch to it
+    // Look for exact match first, then try with instance count
+    let tabIndex = this.tabs.findIndex(tab => tab.label === entityLabel);
+    
+    if (tabIndex === -1 && instanceCount !== undefined) {
+      // Try finding with instance count format
+      const labelWithCount = `${entityLabel} (${instanceCount})`;
+      tabIndex = this.tabs.findIndex(tab => tab.label === labelWithCount);
+    }
+    
+    if (tabIndex !== -1 && this.tabGroup) {
+      this.tabGroup.selectedIndex = tabIndex;
+    }
+  }
+
+  getEntityTypesDataSource(classList: any[] | undefined): MatTableDataSource<any> {
+    return new MatTableDataSource(classList || []);
   }
 
   trackByFn(index: number, item: TabInfo): string {
@@ -838,7 +886,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     const serverDataSource = this.serverSideDataSourceService.createDataSource();
     this.serverDataSources.set(tab.label, serverDataSource);
     
-    // Load initial data if we have the necessary information
+    // Load initial data with 25 items per page if we have the necessary information
     if (tab.uploadInfo?.graphName && tab.uploadInfo?.classUri) {
       serverDataSource.loadData(tab.uploadInfo.graphName, tab.uploadInfo.classUri, 1, 25, '');
     }
@@ -1038,7 +1086,16 @@ LIMIT 1000`;
 
   private extractGraphName(tab: TabInfo): string {
     // Extract graph name from tab's upload info
-    return tab.uploadInfo?.graphName || tab.uploadInfo?.graphId || 'default';
+    const graphName = tab.uploadInfo?.graphName || tab.uploadInfo?.graphId;
+    
+    // If no graph name found, we can't search - should show error
+    if (!graphName || graphName === 'default') {
+      console.warn('No valid graph name found for search. Available: graphx, graphz, graphy');
+      // Try to get the first available graph or default to graphx
+      return 'graphx'; // Default to the first graph since 'default' doesn't exist
+    }
+    
+    return graphName;
   }
 
   newUpload() {

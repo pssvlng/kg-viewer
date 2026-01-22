@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { environment } from '../../environments/environment';
 
 export interface UploadFileResponse {
@@ -50,19 +50,21 @@ export class DocumentService {
     formData.append('file', file);
     formData.append('graphName', graphName);
 
-    return this.http.post<UploadFileResponse>(`${this.apiUrl}/upload_file`, formData);
+    return this.http.post<UploadFileResponse>(`${this.apiUrl}/api/upload`, formData);
   }
 
   getUploadStatus(jobId: string): Observable<UploadJob> {
-    return this.http.get<UploadJob>(`${this.apiUrl}/upload/status/${jobId}`);
+    return this.http.get<UploadJob>(`${this.apiUrl}/api/upload/status/${jobId}`);
   }
 
   getAnalysisProgress(jobId: string): Observable<any> {
-    return this.http.get<any>(`${this.apiUrl}/upload/analysis_progress/${jobId}`);
+    // Analysis phase not implemented yet in clean architecture
+    return of({ progress: 0, status: 'not_implemented', message: 'Analysis phase not implemented yet' });
   }
 
   getAllUploadJobs(): Observable<UploadJob[]> {
-    return this.http.get<UploadJob[]>(`${this.apiUrl}/upload/jobs`);
+    // Job listing not implemented yet in clean architecture
+    return of([]);
   }
 
   getSparqlEndpoint(): Observable<any> {
@@ -70,6 +72,6 @@ export class DocumentService {
   }
 
   healthCheck(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/health`);
+    return this.http.get(`${this.apiUrl}/api/health`);
   }
 }

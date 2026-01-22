@@ -53,7 +53,8 @@ import { GraphsService, Graph, GraphAnalysisResponse } from '../../services/grap
         *ngIf="analysisResults && !loading"
         [results]="analysisResults"
         [hideActions]="true"
-        [showNewUploadButton]="false">
+        [showNewUploadButton]="false"
+        [enableEntityNavigation]="false">
       </app-results>
     </mat-dialog-content>
   `,

@@ -2,6 +2,31 @@
 
 A web application for uploading, analyzing, and visualizing TTL (Turtle) format RDF data in knowledge graphs. The application provides comprehensive analysis of semantic data including class instances, relationships, and detailed tabular views with optional named graph support.
 
+<div align="center">
+  <table>
+    <tr>
+      <td align="center">
+        <img src="screenshots/kg_1.png" width="400" alt="Upload Interface"/>
+        <br><em>TTL File Upload & Processing</em>
+      </td>
+      <td align="center">
+        <img src="screenshots/kg_3.png" width="400" alt="Analysis Results"/>
+        <br><em>Knowledge Graph Analysis</em>
+      </td>
+    </tr>
+    <tr>
+      <td align="center">
+        <img src="screenshots/kg_2.png" width="400" alt="Named Graphs"/>
+        <br><em>Named Graphs Management</em>
+      </td>
+      <td align="center">
+        <img src="screenshots/kg_4.png" width="400" alt="Data Visualization"/>
+        <br><em>Entity Data & Visualization</em>
+      </td>
+    </tr>
+  </table>
+</div>
+
 ## Architecture
 
 The application consists of four main components:

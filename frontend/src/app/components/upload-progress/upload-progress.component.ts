@@ -103,17 +103,6 @@ import { DocumentService, UploadJob } from '../../services/document.service';
           Try Again
         </button>
       </mat-card-actions>
-      
-      <mat-card-actions *ngIf="job?.status === 'success'">
-        <button mat-raised-button color="primary" (click)="viewResults()">
-          <mat-icon>visibility</mat-icon>
-          View Results
-        </button>
-        <button mat-button (click)="goBack()">
-          <mat-icon>arrow_back</mat-icon>
-          New Upload
-        </button>
-      </mat-card-actions>
     </mat-card>
   `,
   styles: [`
@@ -305,10 +294,31 @@ export class UploadProgressComponent implements OnInit, OnDestroy {
 
   viewResults() {
     this.stopPolling();
-    if (this.job?.result_data) {
+    if (this.job?.result_data?.tabs) {
+      // New format with tabs array
       this.navigationRequested.emit({ 
         action: 'showResults', 
-        data: this.job.result_data 
+        data: this.job.result_data.tabs 
+      });
+    } else if (this.job?.result_data) {
+      // Legacy format - wrap in summary tab
+      const legacyTab = {
+        label: "Upload Summary",
+        type: "summary",
+        content: this.job.result_data.message || "Upload completed",
+        uploadInfo: {
+          status: "success",
+          message: this.job.result_data.message || "Upload completed successfully",
+          graphId: this.job.graph_name,
+          graphName: this.job.graph_name,
+          graphUri: `http://localhost:8080/graph/${this.job.graph_name}`,
+          triplesCount: this.job.total_triples,
+          sparqlEndpoint: "http://localhost:8890/sparql"
+        }
+      };
+      this.navigationRequested.emit({ 
+        action: 'showResults', 
+        data: [legacyTab]
       });
     }
   }
