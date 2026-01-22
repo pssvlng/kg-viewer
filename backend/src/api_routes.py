@@ -350,16 +350,12 @@ def get_entity_instances(graph_name: str, class_uri: str):
             search_filter = ""
         
         # First get the instances with pagination (without search filter for now)
-        instances_query = f"""
-        SELECT DISTINCT ?instance WHERE {{
-            GRAPH <{graph_uri}> {{
-                ?instance a <{class_uri}> .
-            }}
-        }}
-        ORDER BY ?instance
-        """
-        
-        if not search:
+        if search:
+            # When searching, get all instances first
+            instances_query = SPARQLQueries.get_query('GET_ALL_CLASS_INSTANCES',
+                                                      graph_uri=graph_uri, class_uri=class_uri)
+        else:
+            # When not searching, use pagination
             instances_query = SPARQLQueries.get_query('GET_CLASS_INSTANCES_PAGINATED',
                                                       graph_uri=graph_uri, class_uri=class_uri,
                                                       limit=size, offset=offset)
@@ -420,11 +416,14 @@ def get_entity_instances(graph_name: str, class_uri: str):
                     filtered_rows.append(row)
             all_rows = filtered_rows
             total_count = len(all_rows)
-        
-        # Apply pagination to filtered results
-        start_idx = offset
-        end_idx = start_idx + size
-        data_rows = all_rows[start_idx:end_idx]
+            
+            # Apply pagination to filtered results for search
+            start_idx = offset
+            end_idx = start_idx + size
+            data_rows = all_rows[start_idx:end_idx]
+        else:
+            # For non-search, we already got paginated results from SPARQL
+            data_rows = all_rows
         
         return jsonify({
             "success": True,
@@ -713,13 +712,36 @@ def get_entity_literals(graph_name: str, entity_uri: str):
 def delete_graph(graph_name: str):
     """Delete graph."""
     try:
+        import sys
+        import os
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.append(backend_dir)
+        from virtuoso import query_sparql
+        
+        # Create graph URI
+        if graph_name == 'default':
+            graph_uri = 'http://localhost:8080/graph/default'
+        else:
+            graph_uri = f'http://localhost:8080/graph/{graph_name}'
+        
+        # Execute delete query
+        delete_query = SPARQLQueries.get_query('DELETE_GRAPH', graph_uri=graph_uri)
+        
+        # Execute the deletion
+        result = query_sparql(delete_query)
+        
+        logger.info(f"Successfully deleted graph: {graph_uri}")
         return jsonify({
-            "success": False,
-            "message": "Graph deletion not implemented yet in clean architecture"
+            "success": True,
+            "message": f"Graph '{graph_name}' deleted successfully"
         })
+        
     except Exception as e:
         logger.error(f"Delete graph failed: {e}")
-        return jsonify({"error": "Service error"}), 500
+        return jsonify({
+            "success": False, 
+            "message": f"Failed to delete graph: {str(e)}"
+        }), 500
 
 def register_api_routes(app):
     """Register API routes with the Flask app."""

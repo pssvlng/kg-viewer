@@ -198,6 +198,26 @@ class SPARQLQueries:
     OFFSET {offset}
     """
     
+    GET_ALL_CLASS_INSTANCES = """
+    SELECT DISTINCT ?instance WHERE {{
+        GRAPH <{graph_uri}> {{
+            ?instance a <{class_uri}> .
+        }}
+    }}
+    ORDER BY ?instance
+    """
+    
+    GET_ENTITY_TYPES_FOR_ANALYSIS = """
+    SELECT ?class (COUNT(?instance) as ?count)
+    FROM <{graph_uri}>
+    WHERE {{
+      ?instance a ?class
+    }}
+    GROUP BY ?class
+    ORDER BY DESC(?count)
+    LIMIT {limit}
+    """
+    
     COUNT_CLASS_INSTANCES_SIMPLE = """
     SELECT (COUNT(DISTINCT ?instance) as ?count) WHERE {{
         GRAPH <{graph_uri}> {{

@@ -10,6 +10,7 @@ from rdflib import Graph
 
 from ...domain.models.upload_job import UploadJob, JobStatus
 from ...infrastructure.repositories.job_repository import JobRepositoryInterface
+from ...infrastructure.constants.sparql_queries import SPARQLQueries
 from ...core.exceptions import UploadProcessingException, JobNotFoundException
 
 logger = logging.getLogger(__name__)
@@ -147,16 +148,8 @@ class UploadJobService:
                     try:
                         print(f"Starting entity analysis for graph: {graph_uri}")
                         # Query for classes and their instance counts
-                        classes_query = f"""
-                        SELECT ?class (COUNT(?instance) as ?count)
-                        FROM <{graph_uri}>
-                        WHERE {{
-                          ?instance a ?class
-                        }}
-                        GROUP BY ?class
-                        ORDER BY DESC(?count)
-                        LIMIT 50
-                        """
+                        classes_query = SPARQLQueries.get_query('GET_ENTITY_TYPES_FOR_ANALYSIS',
+                                                                graph_uri=graph_uri, limit=50)
                         
                         from virtuoso import query_sparql
                         results = query_sparql(classes_query)
