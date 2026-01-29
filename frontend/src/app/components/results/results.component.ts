@@ -16,6 +16,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { debounceTime, distinctUntilChanged, timeout } from 'rxjs/operators';
 import { ServerSideDataSource, ServerSideDataSourceService } from '../../services/server-side-data-source.service';
 import { DocumentService } from '../../services/document.service';
+import { GraphsService } from '../../services/graphs.service';
 import { environment } from '../../../environments/environment';
 import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
 import { GraphViewerComponent } from '../graph-viewer/graph-viewer.component';
@@ -696,6 +697,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   filterControls = new Map<string, FormControl>();
   currentFilters = new Map<string, string>();
   configuredSparqlEndpoint = 'http://localhost:8890/sparql'; // fallback
+  availableGraphs: string[] = []; // Store available graph names
   
   @ViewChildren(MatPaginator) paginators!: QueryList<MatPaginator>;
   @ViewChildren(MatSort) sorts!: QueryList<MatSort>;
@@ -704,7 +706,8 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   constructor(
     private serverSideDataSourceService: ServerSideDataSourceService,
     private http: HttpClient,
-    private documentService: DocumentService
+    private documentService: DocumentService,
+    private graphsService: GraphsService
   ) {
   }
 
@@ -744,6 +747,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
 
   ngOnInit() {
     this.loadConfiguration();
+    this.loadAvailableGraphs();
     this.updateTabs();
   }
 
@@ -765,6 +769,19 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     } catch (error) {
       console.warn('Failed to fetch configuration, using fallback SPARQL endpoint:', error);
       this.configuredSparqlEndpoint = 'http://localhost:8890/sparql';
+    }
+  }
+
+  async loadAvailableGraphs() {
+    try {
+      this.graphsService.getGraphs().subscribe(response => {
+        if (response.success && response.graphs) {
+          this.availableGraphs = response.graphs.map(graph => graph.name);
+          console.log('Available graphs loaded:', this.availableGraphs);
+        }
+      });
+    } catch (error) {
+      console.warn('Failed to load available graphs:', error);
     }
   }
 
@@ -1088,11 +1105,16 @@ LIMIT 1000`;
     // Extract graph name from tab's upload info
     const graphName = tab.uploadInfo?.graphName || tab.uploadInfo?.graphId;
     
-    // If no graph name found, we can't search - should show error
+    // If no graph name found, use the first available graph
     if (!graphName || graphName === 'default') {
-      console.warn('No valid graph name found for search. Available: graphx, graphz, graphy');
-      // Try to get the first available graph or default to graphx
-      return 'graphx'; // Default to the first graph since 'default' doesn't exist
+      if (this.availableGraphs.length > 0) {
+        const firstGraph = this.availableGraphs[0];
+        console.warn(`No valid graph name found for search. Using first available graph: ${firstGraph}. Available graphs: ${this.availableGraphs.join(', ')}`);
+        return firstGraph;
+      } else {
+        console.error('No graphs available for search. Please ensure graphs are loaded.');
+        return 'default'; // Fallback
+      }
     }
     
     return graphName;

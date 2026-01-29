@@ -148,7 +148,19 @@ class SPARQLQueries:
     
     # Graph management queries
     DELETE_GRAPH = """
-    CLEAR GRAPH <{graph_uri}>
+    DROP GRAPH <{graph_uri}>
+    """
+    
+    DELETE_GRAPH_BATCH = """
+    WITH <{graph_uri}>
+    DELETE {{ ?s ?p ?o }}
+    WHERE {{ ?s ?p ?o }}
+    LIMIT {batch_size}
+    """
+    
+    COUNT_GRAPH_TRIPLES = """
+    SELECT (COUNT(*) as ?count)
+    WHERE {{ GRAPH <{graph_uri}> {{ ?s ?p ?o }} }}
     """
     
     LIST_GRAPHS = """
@@ -176,13 +188,14 @@ class SPARQLQueries:
     """
     
     GET_GRAPH_CLASSES_WITH_COUNTS = """
-    SELECT ?class (COUNT(DISTINCT ?instance) as ?count) WHERE {{
+    SELECT ?class (COUNT(DISTINCT ?instance) as ?count) ?classLabel WHERE {{
         GRAPH <{graph_uri}> {{
             ?instance a ?class .
             FILTER(!isBlank(?class))
+            OPTIONAL {{ ?class <http://www.w3.org/2000/01/rdf-schema#label> ?classLabel }}
         }}
     }}
-    GROUP BY ?class
+    GROUP BY ?class ?classLabel
     ORDER BY DESC(?count)
     LIMIT {limit}
     """
@@ -255,38 +268,42 @@ class SPARQLQueries:
     """
     
     GET_ENTITY_OUTWARD_CONNECTIONS = """
-    SELECT DISTINCT ?predicate ?object WHERE {{
+    SELECT DISTINCT ?predicate ?object ?predicateLabel WHERE {{
         GRAPH <{graph_uri}> {{
             <{entity_uri}> ?predicate ?object .
             FILTER(!isLiteral(?object))
+            OPTIONAL {{ ?predicate <http://www.w3.org/2000/01/rdf-schema#label> ?predicateLabel }}
         }}
     }}
     LIMIT {max_nodes}
     """
     
     GET_ENTITY_INWARD_CONNECTIONS = """
-    SELECT DISTINCT ?subject ?predicate WHERE {{
+    SELECT DISTINCT ?subject ?predicate ?predicateLabel WHERE {{
         GRAPH <{graph_uri}> {{
             ?subject ?predicate <{entity_uri}> .
             FILTER(!isLiteral(?subject))
+            OPTIONAL {{ ?predicate <http://www.w3.org/2000/01/rdf-schema#label> ?predicateLabel }}
         }}
     }}
     LIMIT {max_nodes}
     """
     
     GET_ENTITY_BIDIRECTIONAL_CONNECTIONS = """
-    SELECT DISTINCT ?subject ?predicate ?object WHERE {{
+    SELECT DISTINCT ?subject ?predicate ?object ?predicateLabel WHERE {{
         GRAPH <{graph_uri}> {{
             {{
                 <{entity_uri}> ?predicate ?object .
                 FILTER(!isLiteral(?object))
                 BIND(<{entity_uri}> as ?subject)
+                OPTIONAL {{ ?predicate <http://www.w3.org/2000/01/rdf-schema#label> ?predicateLabel }}
             }}
             UNION
             {{
                 ?subject ?predicate <{entity_uri}> .
                 FILTER(!isLiteral(?subject))
                 BIND(<{entity_uri}> as ?object)
+                OPTIONAL {{ ?predicate <http://www.w3.org/2000/01/rdf-schema#label> ?predicateLabel }}
             }}
         }}
     }}

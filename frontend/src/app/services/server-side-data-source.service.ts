@@ -126,7 +126,7 @@ export class ServerSideDataSource extends DataSource<any> {
       .set('page', page.toString())
       .set('pageSize', pageSize.toString());
 
-    const url = `${environment.apiUrl}/api/v2/graphs/${encodeURIComponent(graphName)}/search`;
+    const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/search`;
 
     this.currentRequest = this.http.get<any>(url, { params }).subscribe({
       next: (response) => {

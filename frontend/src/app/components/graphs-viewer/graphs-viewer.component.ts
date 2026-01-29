@@ -343,19 +343,26 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
   }
 
   deleteGraph(graph: Graph) {
-    if (confirm(`Are you sure you want to delete the graph "${graph.name}"?`)) {
+    if (confirm(`Are you sure you want to delete the graph "${graph.name}"? This may take several minutes for large graphs.`)) {
+      // Show initial progress message
+      this.snackBar.open(`Deleting graph "${graph.name}"... This may take several minutes.`, 'Close', { 
+        duration: 0 // Keep open until manually closed
+      });
+      
       this.graphsService.deleteGraph(graph.name).subscribe({
         next: (response) => {
+          this.snackBar.dismiss(); // Close the progress message
           if (response.success) {
-            this.snackBar.open(`Graph "${graph.name}" deleted successfully`, 'Close', { duration: 3000 });
+            this.snackBar.open(`Graph "${graph.name}" deleted successfully`, 'Close', { duration: 5000 });
             this.loadGraphs(); // Refresh the list
           } else {
-            this.snackBar.open('Failed to delete graph', 'Close', { duration: 3000 });
+            this.snackBar.open(`Failed to delete graph: ${response.message}`, 'Close', { duration: 5000 });
           }
         },
         error: (error) => {
+          this.snackBar.dismiss(); // Close the progress message
           console.error('Error deleting graph:', error);
-          this.snackBar.open('Error deleting graph', 'Close', { duration: 3000 });
+          this.snackBar.open(`Error deleting graph: ${error.error?.message || error.message}`, 'Close', { duration: 5000 });
         }
       });
     }

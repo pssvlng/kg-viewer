@@ -237,13 +237,17 @@ def get_graph_analysis(graph_name: str):
                 class_uri = result['class']['value']
                 count = int(result['count']['value'])
                 
-                # Extract label from URI
-                if '#' in class_uri:
-                    label = class_uri.split('#')[-1]
-                elif '/' in class_uri:
-                    label = class_uri.split('/')[-1]
+                # Use classLabel if available, otherwise extract label from URI
+                if 'classLabel' in result and result['classLabel']:
+                    label = result['classLabel']['value']
                 else:
-                    label = class_uri
+                    # Extract label from URI with improved # handling
+                    if '#' in class_uri:
+                        label = class_uri.split('#')[-1]
+                    elif '/' in class_uri:
+                        label = class_uri.split('/')[-1]
+                    else:
+                        label = class_uri
                 
                 entity_types.append({
                     'uri': class_uri,
@@ -541,8 +545,26 @@ def get_entity_graph(graph_name: str, entity_uri: str):
             label_result = query_sparql(label_query)
             if label_result and len(label_result) > 0:
                 return label_result[0]['label']['value']
-            # Fallback to URI fragment
-            return uri.split('/')[-1] if '/' in uri else uri.split('#')[-1] if '#' in uri else uri
+            # Fallback to URI fragment - prioritize # over /
+            if '#' in uri:
+                return uri.split('#')[-1]
+            elif '/' in uri:
+                return uri.split('/')[-1]
+            else:
+                return uri
+        
+        # Helper function to get predicate label
+        def get_predicate_label(uri, sparql_result=None):
+            # First check if we already have the predicate label from SPARQL result
+            if sparql_result and 'predicateLabel' in sparql_result and sparql_result['predicateLabel']:
+                return sparql_result['predicateLabel']['value']
+            # Fallback to URI fragment with improved # handling
+            if '#' in uri:
+                return uri.split('#')[-1]
+            elif '/' in uri:
+                return uri.split('/')[-1]
+            else:
+                return uri
         
         # Add central node with proper label
         central_id = entity_uri
@@ -572,7 +594,7 @@ def get_entity_graph(graph_name: str, entity_uri: str):
                         node_ids.add(obj_uri)
                     
                     # Add edge
-                    pred_label = pred_uri.split('/')[-1] if '/' in pred_uri else pred_uri.split('#')[-1] if '#' in pred_uri else pred_uri
+                    pred_label = get_predicate_label(pred_uri, result)
                     edges.append({
                         'id': f"{central_id}-{pred_uri}-{obj_uri}",
                         'source': central_id,
@@ -596,7 +618,7 @@ def get_entity_graph(graph_name: str, entity_uri: str):
                         node_ids.add(subj_uri)
                     
                     # Add edge
-                    pred_label = pred_uri.split('/')[-1] if '/' in pred_uri else pred_uri.split('#')[-1] if '#' in pred_uri else pred_uri
+                    pred_label = get_predicate_label(pred_uri, result)
                     edges.append({
                         'id': f"{subj_uri}-{pred_uri}-{central_id}",
                         'source': subj_uri,
@@ -622,7 +644,7 @@ def get_entity_graph(graph_name: str, entity_uri: str):
                                 })
                                 node_ids.add(obj_uri)
                             
-                            pred_label = pred_uri.split('/')[-1] if '/' in pred_uri else pred_uri.split('#')[-1] if '#' in pred_uri else pred_uri
+                            pred_label = get_predicate_label(pred_uri, result)
                             edges.append({
                                 'id': f"{central_id}-{pred_uri}-{obj_uri}",
                                 'source': central_id,
@@ -641,7 +663,7 @@ def get_entity_graph(graph_name: str, entity_uri: str):
                                 })
                                 node_ids.add(subj_uri)
                             
-                            pred_label = pred_uri.split('/')[-1] if '/' in pred_uri else pred_uri.split('#')[-1] if '#' in pred_uri else pred_uri
+                            pred_label = get_predicate_label(pred_uri, result)
                             edges.append({
                                 'id': f"{subj_uri}-{pred_uri}-{central_id}",
                                 'source': subj_uri,
@@ -692,8 +714,17 @@ def get_entity_literals(graph_name: str, entity_uri: str):
                 pred_uri = result['predicate']['value']
                 value = result['value']['value']
                 
-                # Extract readable predicate label
-                pred_label = pred_uri.split('/')[-1] if '/' in pred_uri else pred_uri.split('#')[-1] if '#' in pred_uri else pred_uri
+                # Use predicateLabel if available, otherwise extract from URI
+                if 'predicateLabel' in result and result['predicateLabel']:
+                    pred_label = result['predicateLabel']['value']
+                else:
+                    # Extract readable predicate label with improved # handling
+                    if '#' in pred_uri:
+                        pred_label = pred_uri.split('#')[-1]
+                    elif '/' in pred_uri:
+                        pred_label = pred_uri.split('/')[-1]
+                    else:
+                        pred_label = pred_uri
                 
                 literals.append({
                     'predicate': pred_uri,
@@ -710,7 +741,7 @@ def get_entity_literals(graph_name: str, entity_uri: str):
 # Graph deletion endpoint - clean architecture
 @api_bp.route('/graphs/<path:graph_name>', methods=['DELETE'])
 def delete_graph(graph_name: str):
-    """Delete graph."""
+    """Delete graph using chunked deletion for large graphs."""
     try:
         import sys
         import os
@@ -724,16 +755,64 @@ def delete_graph(graph_name: str):
         else:
             graph_uri = f'http://localhost:8080/graph/{graph_name}'
         
-        # Execute delete query
-        delete_query = SPARQLQueries.get_query('DELETE_GRAPH', graph_uri=graph_uri)
+        # First, check how many triples are in the graph
+        count_query = SPARQLQueries.get_query('COUNT_GRAPH_TRIPLES', graph_uri=graph_uri)
+        count_result = query_sparql(count_query, timeout_seconds=60)
         
-        # Execute the deletion
-        result = query_sparql(delete_query)
+        total_triples = 0
+        if count_result and len(count_result) > 0:
+            total_triples = int(count_result[0]['count']['value'])
+        
+        logger.info(f"Starting deletion of graph {graph_uri} with {total_triples} triples")
+        
+        # If it's a small graph (< 50k triples), use direct DROP
+        if total_triples < 50000:
+            delete_query = SPARQLQueries.get_query('DELETE_GRAPH', graph_uri=graph_uri)
+            query_sparql(delete_query, timeout_seconds=120)
+            logger.info(f"Small graph deleted directly: {graph_uri}")
+        else:
+            # For large graphs, use chunked deletion
+            batch_size = 10000
+            deleted_batches = 0
+            
+            while True:
+                # Delete a batch of triples
+                batch_query = SPARQLQueries.get_query('DELETE_GRAPH_BATCH', 
+                                                    graph_uri=graph_uri, 
+                                                    batch_size=batch_size)
+                
+                result = query_sparql(batch_query, timeout_seconds=120)
+                deleted_batches += 1
+                
+                # Check if there are still triples left
+                count_result = query_sparql(count_query, timeout_seconds=60)
+                remaining = 0
+                if count_result and len(count_result) > 0:
+                    remaining = int(count_result[0]['count']['value'])
+                
+                logger.info(f"Deleted batch {deleted_batches}, remaining triples: {remaining}")
+                
+                # If no triples left, break
+                if remaining == 0:
+                    break
+                    
+                # Safety check to prevent infinite loop
+                if deleted_batches > 1000:  # Max 10 million triples in 1000 batches
+                    logger.warning(f"Deletion stopped after {deleted_batches} batches")
+                    break
+            
+            # Finally drop the empty graph to clean up metadata
+            try:
+                drop_query = SPARQLQueries.get_query('DELETE_GRAPH', graph_uri=graph_uri)
+                query_sparql(drop_query, timeout_seconds=60)
+                logger.info(f"Graph metadata cleaned up: {graph_uri}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up graph metadata: {e}")
         
         logger.info(f"Successfully deleted graph: {graph_uri}")
         return jsonify({
             "success": True,
-            "message": f"Graph '{graph_name}' deleted successfully"
+            "message": f"Graph '{graph_name}' deleted successfully ({total_triples} triples removed)"
         })
         
     except Exception as e:
