@@ -148,13 +148,16 @@ class SPARQLQueries:
     
     # Graph management queries
     DELETE_GRAPH = """
-    DROP GRAPH <{graph_uri}>
+    DELETE WHERE {{ GRAPH <{graph_uri}> {{ ?s ?p ?o }} }}
     """
     
     DELETE_GRAPH_BATCH = """
-    WITH <{graph_uri}>
-    DELETE {{ ?s ?p ?o }}
-    WHERE {{ ?s ?p ?o }}
+    DELETE {{
+      GRAPH <{graph_uri}> {{ ?s ?p ?o }}
+    }}
+    WHERE {{
+      GRAPH <{graph_uri}> {{ ?s ?p ?o }}
+    }}
     LIMIT {batch_size}
     """
     

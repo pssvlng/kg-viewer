@@ -683,6 +683,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   @Input() enableEntityNavigation: boolean = true; // Enable entity type clicking
   @Input() showNewUploadButton: boolean = true; // Control New Upload button visibility
   @Input() restoreState: any = null; // State to restore when coming back from navigation
+  @Input() graphInfo: any = null; // Current graph context for search
   @Output() newUploadRequested = new EventEmitter<void>();
   @Output() contentNavigation = new EventEmitter<ContentNavigationEvent>();
   @Output() viewEntityGraphRequested = new EventEmitter<any>();
@@ -1102,10 +1103,16 @@ LIMIT 1000`;
   }
 
   private extractGraphName(tab: TabInfo): string {
-    // Extract graph name from tab's upload info
-    const graphName = tab.uploadInfo?.graphName || tab.uploadInfo?.graphId;
+    // First try to get graph name from tab's upload info
+    let graphName = tab.uploadInfo?.graphName || tab.uploadInfo?.graphId;
     
-    // If no graph name found, use the first available graph
+    // If no graph name in tab, use the current graph context (for viewing existing graphs)
+    if ((!graphName || graphName === 'default') && this.graphInfo) {
+      graphName = this.graphInfo.name;
+      console.log(`Using current graph context for search: ${graphName}`);
+    }
+    
+    // If still no graph name found, use the first available graph
     if (!graphName || graphName === 'default') {
       if (this.availableGraphs.length > 0) {
         const firstGraph = this.availableGraphs[0];
