@@ -13,7 +13,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { debounceTime, distinctUntilChanged, timeout } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, timeout, take } from 'rxjs/operators';
 import { ServerSideDataSource, ServerSideDataSourceService } from '../../services/server-side-data-source.service';
 import { DocumentService } from '../../services/document.service';
 import { GraphsService } from '../../services/graphs.service';
@@ -290,22 +290,36 @@ export interface TabInfo {
                 <h3>{{ tab.content }}</h3>
                 <div class="table-actions">
                   <mat-form-field appearance="outline">
-                    <mat-label>Filter</mat-label>
+                    <mat-label>Filter Results</mat-label>
                     <input matInput 
-                           [formControl]="getFilterControl(tab)"
-                           placeholder="Filter Results">
-                    <mat-icon matSuffix 
-                              *ngIf="getFilterControl(tab).value" 
-                              class="clear-icon"
-                              (click)="clearFilter(tab)"
-                              matTooltip="Clear Filter">close</mat-icon>
+                           #filterInput
+                           placeholder="Enter filter term and press Enter or click search"
+                           (keyup.enter)="triggerFilter(tab, filterInput.value)">
+                    <button mat-icon-button 
+                            matSuffix 
+                            (click)="triggerFilter(tab, filterInput.value)"
+                            matTooltip="Filter">
+                      <mat-icon>search</mat-icon>
+                    </button>
+                    <button mat-icon-button 
+                            matSuffix 
+                            (click)="clearFilter(tab, filterInput)"
+                            matTooltip="Clear Filter"
+                            *ngIf="filterInput.value">
+                      <mat-icon>close</mat-icon>
+                    </button>
                   </mat-form-field>
                   
-                  <!-- Loading spinner for server-side tables -->
+                  <!-- Loading spinner for server-side tables and filtering -->
                   <mat-spinner 
-                    *ngIf="isServerSideDataSource(tab) && (getServerDataSource(tab)?.loading$ | async)"
+                    *ngIf="(isServerSideDataSource(tab) && (getServerDataSource(tab)?.loading$ | async)) || isFilterLoading(tab)"
                     diameter="20">
                   </mat-spinner>
+                </div>
+                
+                <!-- Filter Loading Message -->
+                <div *ngIf="isFilterLoading(tab)" class="filter-loading">
+                  <p>Filtering, please be patient...</p>
                 </div>
               </div>
               
@@ -396,9 +410,17 @@ export interface TabInfo {
                     </td>
                   </ng-container>
                   
+
                   <tr mat-header-row *matHeaderRowDef="getDisplayedColumns(tab)"></tr>
                   <tr mat-row *matRowDef="let row; columns: getDisplayedColumns(tab);"></tr>
                 </table>
+                
+                <!-- Message display outside table but styled to look like a table row -->
+                <div *ngIf="getServerDataSource(tab)?.message$ | async as message" class="table-message-row">
+                  <div class="table-message">
+                    {{ message }}
+                  </div>
+                </div>
               </div>
               
               <!-- Client-side paginator -->
@@ -673,6 +695,44 @@ export interface TabInfo {
       color: #666;
       font-size: 14px;
     }
+    
+    .server-message {
+      padding: 12px 16px;
+      background-color: #fff3cd;
+      border: 1px solid #ffeaa7;
+      border-radius: 4px;
+      margin-bottom: 16px;
+    }
+    
+    .limit-message {
+      margin: 0;
+      color: #856404;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    
+    .message-cell {
+      text-align: center;
+      padding: 16px !important;
+      background-color: #fff3cd;
+      border-top: 1px solid #ffeaa7;
+    }
+    
+    .table-message {
+      color: #856404;
+      font-size: 14px;
+      font-weight: 500;
+      padding: 8px;
+    }
+    
+    .table-message-row {
+      background-color: #fff3cd;
+      border: 1px solid #ffeaa7;
+      border-top: none;
+      text-align: center;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
   `]
 })
 export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy, ContentNavigable {
@@ -696,6 +756,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   searchLoadingSubscriptions = new Map<string, any>();
   displayedColumns = new Map<string, string[]>();
   filterControls = new Map<string, FormControl>();
+  filterStates = new Map<string, { isLoading: boolean; lastFilterTerm?: string }>();
   currentFilters = new Map<string, string>();
   configuredSparqlEndpoint = 'http://localhost:8890/sparql'; // fallback
   availableGraphs: string[] = []; // Store available graph names
@@ -870,17 +931,12 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
           this.setupClientSideDataSource(tab);
         }
         
-        // Setup filter control for this tab
+        // Setup filter control for this tab (no debouncing)
         const filterControl = new FormControl('');
         this.filterControls.set(tab.label, filterControl);
         
-        // Setup filter debouncing
-        filterControl.valueChanges.pipe(
-          debounceTime(300),
-          distinctUntilChanged()
-        ).subscribe(filterValue => {
-          this.applyFilter(filterValue || '', tab);
-        });
+        // Initialize filter state
+        this.filterStates.set(tab.label, { isLoading: false });
       } else if (tab.type === 'search') {
         // Initialize search state for search tabs
         this.searchStates.set(tab.label, { hasSearched: false, isLoading: false, pageIndex: 0, pageSize: 25 });
@@ -940,6 +996,8 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     return this.serverDataSources.get(tab.label) || null;
   }
 
+  // Remove the shouldShowMessage method - we'll use a different approach
+
   getDisplayedColumns(tab: TabInfo): string[] {
     // Return conditional columns based on hideActions
     return this.hideActions ? ['label', 'uri'] : ['label', 'uri', 'actions'];
@@ -998,9 +1056,41 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     return this.filterControls.get(tab.label) || new FormControl('');
   }
 
-  clearFilter(tab: TabInfo) {
+  clearFilter(tab: TabInfo, filterInput?: any) {
+    if (filterInput) {
+      filterInput.value = '';
+    }
     const filterControl = this.getFilterControl(tab);
     filterControl.setValue('');
+    
+    // Reset filter state
+    this.filterStates.set(tab.label, { isLoading: false });
+    
+    // Apply empty filter to show all records
+    this.applyFilter('', tab);
+  }
+  
+  triggerFilter(tab: TabInfo, filterTerm?: string) {
+    const term = filterTerm?.trim();
+    if (!term) {
+      // If empty, clear the filter
+      this.clearFilter(tab);
+      return;
+    }
+    
+    // Set loading state
+    this.filterStates.set(tab.label, { isLoading: true, lastFilterTerm: term });
+    
+    // Add small delay to show loading state, then apply filter
+    setTimeout(() => {
+      this.applyFilter(term, tab);
+      // Clear loading state after filter is applied
+      this.filterStates.set(tab.label, { isLoading: false, lastFilterTerm: term });
+    }, 100);
+  }
+  
+  isFilterLoading(tab: TabInfo): boolean {
+    return this.filterStates.get(tab.label)?.isLoading || false;
   }
 
   getClassesDataSource(classesData: any[]): MatTableDataSource<any> {

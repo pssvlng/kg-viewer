@@ -341,102 +341,136 @@ def get_entity_instances(graph_name: str, class_uri: str):
         size = int(request.args.get('size', 10))
         offset = page * size
         
-        # Get search/filter parameter
-        search = request.args.get('search', '').strip()
-        
-        # Build SPARQL query for instances with proper search filtering
-        if search:
-            # First get all instances, then filter after we get their labels
-            search_applied_later = True
-            search_filter = ""
-        else:
-            search_applied_later = False
-            search_filter = ""
-        
-        # First get the instances with pagination (without search filter for now)
-        if search:
-            # When searching, get all instances first
-            instances_query = SPARQLQueries.get_query('GET_ALL_CLASS_INSTANCES',
-                                                      graph_uri=graph_uri, class_uri=class_uri)
-        else:
-            # When not searching, use pagination
-            instances_query = SPARQLQueries.get_query('GET_CLASS_INSTANCES_PAGINATED',
-                                                      graph_uri=graph_uri, class_uri=class_uri,
-                                                      limit=size, offset=offset)
-        
-        # Get total count for pagination (without search for now)
+        # Get total count first for pagination metadata
         count_query = SPARQLQueries.get_query('COUNT_CLASS_INSTANCES_SIMPLE',
                                               graph_uri=graph_uri, class_uri=class_uri)
-        
-        instances_result = query_sparql(instances_query)
         count_result = query_sparql(count_query)
         
         total_count = 0
         if count_result and len(count_result) > 0:
             total_count = int(count_result[0]['count']['value'])
         
-        # Process results into table format with original structure
+        # Check if the requested offset exceeds Virtuoso's 10k limit
+        virtuoso_limit = 10000
+        if offset >= virtuoso_limit:
+            # Return limit message but preserve correct total count
+            return jsonify({
+                "success": True,
+                "data": [],
+                "message": "Only first 10000 records are displayed",
+                "totalElements": total_count,
+                "totalPages": (total_count + size - 1) // size,
+                "size": size,
+                "number": page
+            })
+        
+        # Get search/filter parameter
+        search = request.args.get('search', '').strip()
+        
+        # Get total count first for pagination metadata - use appropriate count query
+        if search:
+            # Use filtered count query
+            count_query = SPARQLQueries.get_query('COUNT_CLASS_INSTANCES_WITH_FILTER',
+                                                  graph_uri=graph_uri, class_uri=class_uri,
+                                                  filter_text=search)
+        else:
+            # Use regular count query
+            count_query = SPARQLQueries.get_query('COUNT_CLASS_INSTANCES_SIMPLE',
+                                                  graph_uri=graph_uri, class_uri=class_uri)
+        
+        count_result = query_sparql(count_query)
+        
+        total_count = 0
+        if count_result and len(count_result) > 0:
+            total_count = int(count_result[0]['count']['value'])
+        
+        # Check if the requested offset exceeds Virtuoso's 10k limit
+        virtuoso_limit = 10000
+        message = None
+        if offset >= virtuoso_limit:
+            # Return limit message but preserve correct total count
+            message = "Only first 10000 records are displayed"
+            return jsonify({
+                "success": True,
+                "data": [],
+                "message": message,
+                "totalElements": total_count,
+                "totalPages": (total_count + size - 1) // size,
+                "size": size,
+                "number": page
+            })
+        
+        # Build SPARQL query for instances with proper search filtering
+        if search:
+            # Use filtered query with pagination
+            instances_query = SPARQLQueries.get_query('GET_CLASS_INSTANCES_WITH_FILTER',
+                                                      graph_uri=graph_uri, class_uri=class_uri,
+                                                      filter_text=search, limit=size, offset=offset)
+        else:
+            # Use regular paginated query
+            instances_query = SPARQLQueries.get_query('GET_CLASS_INSTANCES_PAGINATED',
+                                                      graph_uri=graph_uri, class_uri=class_uri,
+                                                      limit=size, offset=offset)
+        
+        instances_result = query_sparql(instances_query)
+        
+        # Process results into table format
         data_rows = []
-        all_rows = []  # For search filtering
         
         if instances_result:
             for result in instances_result:
                 instance_uri = result['instance']['value']
                 
-                # Extract readable instance label
-                if '#' in instance_uri:
-                    instance_label = instance_uri.split('#')[-1]
-                elif '/' in instance_uri:
-                    instance_label = instance_uri.split('/')[-1]
+                # Use label from query if available, otherwise extract from URI
+                if search and 'label' in result and result['label']:
+                    instance_label = result['label']['value']
                 else:
-                    instance_label = instance_uri
+                    # Extract readable instance label from URI
+                    if '#' in instance_uri:
+                        instance_label = instance_uri.split('#')[-1]
+                    elif '/' in instance_uri:
+                        instance_label = instance_uri.split('/')[-1]
+                    else:
+                        instance_label = instance_uri
                 
                 # Create row with original structure (label, uri)
                 row = {
-                    'label': instance_label,  # Use label field as expected
-                    'uri': instance_uri       # Use uri field as expected
+                    'label': instance_label,
+                    'uri': instance_uri
                 }
                 
-                # Get a few key properties to enhance the label if possible
-                props_query = SPARQLQueries.get_query('GET_ENTITY_PROPERTIES',
-                                                      graph_uri=graph_uri, entity_uri=instance_uri)
+                # For non-search queries, still try to get enhanced labels
+                if not search:
+                    props_query = SPARQLQueries.get_query('GET_ENTITY_PROPERTIES',
+                                                          graph_uri=graph_uri, entity_uri=instance_uri)
+                    
+                    props_result = query_sparql(props_query)
+                    if props_result and len(props_result) > 0:
+                        # Use the first label/name/title found
+                        label_value = props_result[0]['value']['value']
+                        if label_value and len(label_value.strip()) > 0:
+                            row['label'] = label_value.strip()
                 
-                props_result = query_sparql(props_query)
-                if props_result and len(props_result) > 0:
-                    # Use the first label/name/title found
-                    label_value = props_result[0]['value']['value']
-                    if label_value and len(label_value.strip()) > 0:
-                        row['label'] = label_value.strip()
-                
-                all_rows.append(row)
+                data_rows.append(row)
         
-        # Apply search filtering after getting labels
-        if search:
-            search_lower = search.lower()
-            filtered_rows = []
-            for row in all_rows:
-                if (search_lower in row['label'].lower() or 
-                    search_lower in row['uri'].lower()):
-                    filtered_rows.append(row)
-            all_rows = filtered_rows
-            total_count = len(all_rows)
-            
-            # Apply pagination to filtered results for search
-            start_idx = offset
-            end_idx = start_idx + size
-            data_rows = all_rows[start_idx:end_idx]
-        else:
-            # For non-search, we already got paginated results from SPARQL
-            data_rows = all_rows
+        # Check if we should show the 10k limit message for filtered results too
+        if search and total_count > virtuoso_limit and offset < virtuoso_limit:
+            message = "Only first 10000 records are displayed"
         
-        return jsonify({
+        response_data = {
             "success": True,
             "data": data_rows,
             "totalElements": total_count,
             "totalPages": (total_count + size - 1) // size,
             "size": size,
             "number": page
-        })
+        }
+        
+        # Add message if there is one
+        if message:
+            response_data["message"] = message
+            
+        return jsonify(response_data)
     except Exception as e:
         logger.error(f"Entity instances query failed: {e}")
         return jsonify({"error": f"Failed to load entity instances: {str(e)}"}), 500

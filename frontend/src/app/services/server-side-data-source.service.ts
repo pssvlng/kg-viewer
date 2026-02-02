@@ -24,6 +24,7 @@ export interface PaginatedResponse {
 export class ServerSideDataSource extends DataSource<any> {
   private dataSubject = new BehaviorSubject<any[]>([]);
   private loadingSubject = new BehaviorSubject<boolean>(false);
+  private messageSubject = new BehaviorSubject<string | null>(null);
   private paginationSubject = new BehaviorSubject<PaginationInfo>({
     page: 1,
     pageSize: 50,
@@ -35,6 +36,7 @@ export class ServerSideDataSource extends DataSource<any> {
   private currentRequest: Subscription | null = null;
 
   public loading$ = this.loadingSubject.asObservable();
+  public message$ = this.messageSubject.asObservable();
   public pagination$ = this.paginationSubject.asObservable();
   public data$ = this.dataSubject.asObservable();
 
@@ -85,8 +87,12 @@ export class ServerSideDataSource extends DataSource<any> {
 
     this.http.get<any>(url, { params }).subscribe({
       next: (response) => {
+        console.log('ServerSideDataSource - Page:', page, 'Success:', response.success, 'Message:', response.message, 'Data length:', response.data?.length);
         if (response.success) {
+          // Always update data - empty array for pages beyond limit, actual data for valid pages
           this.dataSubject.next(response.data || []);
+          // Handle message from backend (e.g., 10k limit message)
+          this.messageSubject.next(response.message || null);
           // Convert API response to our pagination format
           const pagination: PaginationInfo = {
             page: (response.number || 0) + 1, // Convert back to 1-based
@@ -99,12 +105,14 @@ export class ServerSideDataSource extends DataSource<any> {
           this.paginationSubject.next(pagination);
         } else {
           this.dataSubject.next([]);
+          this.messageSubject.next(null);
           console.error('Server returned error:', response.error);
         }
         this.loadingSubject.next(false);
       },
       error: (error) => {
         this.dataSubject.next([]);
+        this.messageSubject.next(null);
         this.loadingSubject.next(false);
         console.error('Error loading data:', error);
       }
