@@ -1,5 +1,5 @@
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 
@@ -41,28 +41,42 @@ export class GraphVisualizationService {
 
   constructor(private http: HttpClient) {}
 
-  getEntityGraph(graphName: string, entityUri: string, depth: number = 1, direction: 'outward' | 'inward' | 'both' = 'both'): Observable<GraphData> {
+  getEntityGraph(
+    graphName: string,
+    entityUri: string,
+    depth: number = 1,
+    direction: 'outward' | 'inward' | 'both' = 'both',
+    graphUri?: string
+  ): Observable<GraphData> {
     const encodedGraphName = encodeURIComponent(graphName);
     const encodedEntityUri = encodeURIComponent(entityUri);
+    let params = new HttpParams()
+      .set('depth', depth.toString())
+      .set('maxNodes', '50')
+      .set('direction', direction);
+
+    if (graphUri) {
+      params = params.set('graphUri', graphUri);
+    }
     
     return this.http.get<GraphData>(
       `${this.apiUrl}/api/graphs/${encodedGraphName}/entities/${encodedEntityUri}/graph`,
-      { 
-        params: { 
-          depth: depth.toString(),
-          maxNodes: '50',
-          direction: direction
-        }
-      }
+      { params }
     );
   }
 
-  getEntityLiterals(graphName: string, entityUri: string): Observable<LiteralProperty[]> {
+  getEntityLiterals(graphName: string, entityUri: string, graphUri?: string): Observable<LiteralProperty[]> {
     const encodedGraphName = encodeURIComponent(graphName);
     const encodedEntityUri = encodeURIComponent(entityUri);
+    let params = new HttpParams();
+
+    if (graphUri) {
+      params = params.set('graphUri', graphUri);
+    }
     
     return this.http.get<LiteralProperty[]>(
-      `${this.apiUrl}/api/graphs/${encodedGraphName}/entities/${encodedEntityUri}/literals`
+      `${this.apiUrl}/api/graphs/${encodedGraphName}/entities/${encodedEntityUri}/literals`,
+      { params }
     );
   }
 }

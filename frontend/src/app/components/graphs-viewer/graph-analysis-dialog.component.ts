@@ -1,12 +1,12 @@
-import { Component, Inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { Component, Inject, OnInit } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
+import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { Graph, GraphAnalysisResponse, GraphsService } from '../../services/graphs.service';
 import { ResultsComponent } from '../results/results.component';
-import { GraphsService, Graph, GraphAnalysisResponse } from '../../services/graphs.service';
 
 @Component({
   selector: 'app-graph-analysis-dialog',
@@ -137,7 +137,7 @@ export class GraphAnalysisDialogComponent implements OnInit {
     this.loading = true;
     this.error = null;
     
-    this.graphsService.getGraphAnalysis(this.data.graph.name).subscribe(
+    this.graphsService.getGraphAnalysis(this.data.graph.name, this.data.graph.uri).subscribe(
       (response: GraphAnalysisResponse) => {
         this.loading = false;
         if (response.success) {

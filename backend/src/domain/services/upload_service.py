@@ -193,7 +193,7 @@ class UploadJobService:
                                 "graphName": job.graph_name,
                                 "graphUri": graph_uri,
                                 "triplesCount": job.total_triples,
-                                "sparqlEndpoint": "http://localhost:8890/sparql",
+                                "sparqlEndpoint": config.sparql_endpoint,
                                 "analysisResults": {
                                     "totalTriples": job.total_triples,
                                     "foundClassesCount": len(entity_types),

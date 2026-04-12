@@ -1,24 +1,24 @@
-import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, ViewChildren, ViewChild, QueryList, AfterViewInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule, FormControl, ReactiveFormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
-import { MatCardModule } from '@angular/material/card';
-import { MatTabsModule, MatTabGroup } from '@angular/material/tabs';
-import { MatTableModule, MatTableDataSource } from '@angular/material/table';
-import { MatPaginatorModule, MatPaginator, PageEvent } from '@angular/material/paginator';
-import { MatSortModule, MatSort } from '@angular/material/sort';
+import { AfterViewInit, Component, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, QueryList, SimpleChanges, ViewChild, ViewChildren } from '@angular/core';
+import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatIconModule } from '@angular/material/icon';
+import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatPaginator, MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSort, MatSortModule } from '@angular/material/sort';
+import { MatTableDataSource, MatTableModule } from '@angular/material/table';
+import { MatTabGroup, MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { debounceTime, distinctUntilChanged, timeout, take } from 'rxjs/operators';
-import { ServerSideDataSource, ServerSideDataSourceService } from '../../services/server-side-data-source.service';
-import { DocumentService } from '../../services/document.service';
-import { GraphsService } from '../../services/graphs.service';
+import { timeout } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
+import { DocumentService } from '../../services/document.service';
+import { GraphsService } from '../../services/graphs.service';
+import { ServerSideDataSource, ServerSideDataSourceService } from '../../services/server-side-data-source.service';
 import { GraphViewerComponent } from '../graph-viewer/graph-viewer.component';
 
 export interface UploadInfo {
@@ -819,8 +819,10 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
       const response = await this.http.get<any>(`${environment.apiUrl}/api/config`).toPromise();
       const config = response?.config;
       
-      // Use external_virtuoso_url if available, otherwise fall back to localhost
-      if (config?.external_virtuoso_url) {
+      // Prefer explicit SPARQL endpoint from backend configuration
+      if (config?.sparql_endpoint) {
+        this.configuredSparqlEndpoint = config.sparql_endpoint;
+      } else if (config?.external_virtuoso_url) {
         this.configuredSparqlEndpoint = `${config.external_virtuoso_url}/sparql`;
       } else if (config?.virtuoso_url) {
         // Convert internal URL to external URL
@@ -962,7 +964,14 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     
     // Load initial data with 25 items per page if we have the necessary information
     if (tab.uploadInfo?.graphName && tab.uploadInfo?.classUri) {
-      serverDataSource.loadData(tab.uploadInfo.graphName, tab.uploadInfo.classUri, 1, 25, '');
+      serverDataSource.loadData(
+        tab.uploadInfo.graphName,
+        tab.uploadInfo.classUri,
+        1,
+        25,
+        '',
+        tab.uploadInfo.graphUri
+      );
     }
   }
 
@@ -1022,7 +1031,8 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
           tab.uploadInfo.classUri,
           1, // Reset to first page
           25, // Default page size
-          filterValue
+          filterValue,
+          tab.uploadInfo.graphUri
         );
       }
     } else {
@@ -1045,7 +1055,8 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
           tab.uploadInfo.classUri,
           event.pageIndex + 1, // Convert to 1-based page number
           event.pageSize,
-          currentFilter
+          currentFilter,
+          tab.uploadInfo.graphUri
         );
       }
     }
@@ -1122,12 +1133,14 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   }
 
   getSparqlQueryUrl(uploadInfo: any): string {
-    if (!uploadInfo?.graphId) {
+    if (!uploadInfo) {
       return this.configuredSparqlEndpoint;
     }
 
-    const graphName = uploadInfo.graphId;
-    const graphUri = uploadInfo.graphUri || `http://localhost:8080/graph/${graphName}`;
+    const graphUri = uploadInfo.graphUri || uploadInfo.graphId;
+    if (!graphUri) {
+      return this.configuredSparqlEndpoint;
+    }
     
     const sparqlQuery = `select * from <${graphUri}>
 where {
@@ -1150,7 +1163,7 @@ LIMIT 1000`;
   }
 
   viewEntityGraph(element: any, tab: TabInfo) {
-    const graphName = this.extractGraphName(tab);
+    const graphContext = this.extractGraphContext(tab);
     
     if (this.isInContainer) {
       // Use container navigation - preserve current results state
@@ -1160,7 +1173,8 @@ LIMIT 1000`;
         data: {
           entityUri: element.uri,
           entityLabel: element.label,
-          graphName: graphName,
+          graphName: graphContext.graphName,
+          graphUri: graphContext.graphUri,
           // Store the current results state to restore when coming back
           preserveState: {
             results: this.results,
@@ -1174,7 +1188,8 @@ LIMIT 1000`;
       this.viewEntityGraphRequested.emit({
         entityUri: element.uri,
         entityLabel: element.label,
-        graphName: graphName
+        graphName: graphContext.graphName,
+        graphUri: graphContext.graphUri
       });
     }
   }
@@ -1192,13 +1207,15 @@ LIMIT 1000`;
     }
   }
 
-  private extractGraphName(tab: TabInfo): string {
+  private extractGraphContext(tab: TabInfo): { graphName: string; graphUri?: string } {
     // First try to get graph name from tab's upload info
     let graphName = tab.uploadInfo?.graphName || tab.uploadInfo?.graphId;
+    let graphUri = tab.uploadInfo?.graphUri;
     
     // If no graph name in tab, use the current graph context (for viewing existing graphs)
     if ((!graphName || graphName === 'default') && this.graphInfo) {
       graphName = this.graphInfo.name;
+      graphUri = graphUri || this.graphInfo.uri;
       console.log(`Using current graph context for search: ${graphName}`);
     }
     
@@ -1207,14 +1224,14 @@ LIMIT 1000`;
       if (this.availableGraphs.length > 0) {
         const firstGraph = this.availableGraphs[0];
         console.warn(`No valid graph name found for search. Using first available graph: ${firstGraph}. Available graphs: ${this.availableGraphs.join(', ')}`);
-        return firstGraph;
+        return { graphName: firstGraph, graphUri };
       } else {
         console.error('No graphs available for search. Please ensure graphs are loaded.');
-        return 'default'; // Fallback
+        return { graphName: 'default', graphUri }; // Fallback
       }
     }
     
-    return graphName;
+    return { graphName, graphUri };
   }
 
   newUpload() {
@@ -1254,8 +1271,14 @@ LIMIT 1000`;
       return;
     }
     
-    const graphName = this.extractGraphName(tab);
+    const graphContext = this.extractGraphContext(tab);
+    const graphName = graphContext.graphName;
     const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/search`;
+    let params: any = { q: searchTerm };
+
+    if (graphContext.graphUri) {
+      params.graphUri = graphContext.graphUri;
+    }
     
     // Set loading state
     this.searchStates.set(tab.label, { 
@@ -1264,9 +1287,7 @@ LIMIT 1000`;
       isLoading: true
     });
     
-    this.http.get<any>(url, {
-      params: { q: searchTerm }
-    }).pipe(
+    this.http.get<any>(url, { params }).pipe(
       timeout(30000) // 30 second timeout
     ).subscribe({
       next: (response) => {

@@ -5,7 +5,9 @@ import logging
 import threading
 from flask import Blueprint, request, jsonify
 from typing import Optional
+from urllib.parse import unquote
 from rdflib import Graph
+from config import config
 
 # Import new services
 try:
@@ -22,6 +24,32 @@ logger = logging.getLogger(__name__)
 # Create blueprint for new API endpoints
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
+
+def _resolve_graph_uri(graph_name: str) -> str:
+    """Resolve graph URI from query string override, URI value, or graph name."""
+    graph_uri_override = request.args.get('graphUri', '').strip()
+    if graph_uri_override:
+        return unquote(graph_uri_override)
+
+    if graph_name.startswith('http://') or graph_name.startswith('https://'):
+        return graph_name
+
+    if not graph_name or graph_name == 'default':
+        return config.default_graph_uri
+
+    return config.get_graph_uri(graph_name)
+
+
+def _extract_graph_name(graph_name: str, graph_uri: str) -> str:
+    """Return a display graph name, preferring explicit route name when available."""
+    if graph_name and graph_name != 'default' and not graph_name.startswith('http://') and not graph_name.startswith('https://'):
+        return graph_name
+
+    trimmed_uri = graph_uri.rstrip('/')
+    if not trimmed_uri:
+        return config.default_graph_name
+    return trimmed_uri.split('/')[-1] or config.default_graph_name
+
 @api_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check using new architecture."""
@@ -32,9 +60,9 @@ def health_check():
         response = HealthResponse(
             status="healthy",
             service="Knowledge Graph Viewer Backend",
-            virtuoso_url="http://virtuoso:8890",
-            sparql_endpoint="http://virtuoso:8890/sparql", 
-            external_virtuoso_url="http://localhost:8890"
+            virtuoso_url=config.virtuoso_url,
+            sparql_endpoint=config.virtuoso_sparql_endpoint,
+            external_virtuoso_url=config.external_virtuoso_url
         )
         
         return jsonify(response.model_dump())
@@ -49,9 +77,10 @@ def get_config():
         config_data = {
             "success": True,
             "config": {
+                **config.to_dict(),
                 "maxUploadSize": "100MB",
                 "supportedFormats": ["turtle", "rdf", "nt", "n3"],
-                "virtuosoEndpoint": "http://virtuoso:8890/sparql"
+                "virtuosoEndpoint": config.virtuoso_sparql_endpoint
             }
         }
         return jsonify(config_data)
@@ -211,11 +240,8 @@ def get_graph_analysis(graph_name: str):
         sys.path.append(backend_dir)
         from virtuoso import query_sparql
         
-        # Create graph URI
-        if graph_name == 'default':
-            graph_uri = 'http://localhost:8080/graph/default'
-        else:
-            graph_uri = f'http://localhost:8080/graph/{graph_name}'
+        graph_uri = _resolve_graph_uri(graph_name)
+        resolved_graph_name = _extract_graph_name(graph_name, graph_uri)
         
         # Get basic graph statistics
         count_query = SPARQLQueries.get_query('COUNT_GRAPH_TRIPLES', graph_uri=graph_uri)
@@ -264,12 +290,12 @@ def get_graph_analysis(graph_name: str):
                 "content": f"Analysis results for graph: {graph_name}",
                 "uploadInfo": {
                     "status": "success",
-                    "message": f"Graph analysis completed for {graph_name}",
-                    "graphId": graph_name,
-                    "graphName": graph_name,
+                    "message": f"Graph analysis completed for {resolved_graph_name}",
+                    "graphId": resolved_graph_name,
+                    "graphName": resolved_graph_name,
                     "graphUri": graph_uri,
                     "triplesCount": total_triples,
-                    "sparqlEndpoint": "http://localhost:8890/sparql",
+                    "sparqlEndpoint": config.sparql_endpoint,
                     "analysisResults": {
                         "totalTriples": total_triples,
                         "foundClassesCount": len(entity_types),
@@ -281,6 +307,12 @@ def get_graph_analysis(graph_name: str):
                 "label": "Search",
                 "type": "search",
                 "content": "SPARQL Search Interface",
+                "uploadInfo": {
+                    "graphId": resolved_graph_name,
+                    "graphName": resolved_graph_name,
+                    "graphUri": graph_uri,
+                    "sparqlEndpoint": config.sparql_endpoint
+                },
                 "data": []
             }
         ]
@@ -294,15 +326,15 @@ def get_graph_analysis(graph_name: str):
                 "data": [],  # Will be loaded on demand
                 "uploadInfo": {
                     "classUri": entity_type['uri'],
-                    "graphName": graph_name,
+                    "graphName": resolved_graph_name,
                     "graphUri": graph_uri,
-                    "sparqlEndpoint": "http://localhost:8890/sparql"
+                    "sparqlEndpoint": config.sparql_endpoint
                 }
             })
         
         return jsonify({
             "success": True,
-            "graphName": graph_name,
+            "graphName": resolved_graph_name,
             "graphUri": graph_uri,
             "tabs": tabs,
             "analysis": {
@@ -325,16 +357,9 @@ def get_entity_instances(graph_name: str, class_uri: str):
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         sys.path.append(backend_dir)
         from virtuoso import query_sparql
-        from urllib.parse import unquote
-        
         # Decode the class URI
         class_uri = unquote(class_uri)
-        
-        # Create graph URI
-        if graph_name == 'default':
-            graph_uri = 'http://localhost:8080/graph/default'
-        else:
-            graph_uri = f'http://localhost:8080/graph/{graph_name}'
+        graph_uri = _resolve_graph_uri(graph_name)
         
         # Get pagination parameters
         page = int(request.args.get('page', 0))
@@ -491,11 +516,8 @@ def search_graph(graph_name: str):
         if not search_query:
             return jsonify({"success": False, "error": "No search query provided"}), 400
         
-        # Create graph URI
-        if graph_name == 'default':
-            graph_uri = 'http://localhost:8080/graph/default'
-        else:
-            graph_uri = f'http://localhost:8080/graph/{graph_name}'
+        graph_uri = _resolve_graph_uri(graph_name)
+        resolved_graph_name = _extract_graph_name(graph_name, graph_uri)
         
         # SPARQL query to search for literals containing the search term
         sparql_query = SPARQLQueries.get_query('SEARCH_LITERALS',
@@ -517,7 +539,8 @@ def search_graph(graph_name: str):
             "success": True,
             "results": search_results,
             "query": search_query,
-            "graphName": graph_name,
+            "graphName": resolved_graph_name,
+            "graphUri": graph_uri,
             "count": len(search_results)
         })
         
@@ -535,16 +558,9 @@ def get_entity_graph(graph_name: str, entity_uri: str):
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         sys.path.append(backend_dir)
         from virtuoso import query_sparql
-        from urllib.parse import unquote
-        
         # Decode the entity URI
         entity_uri = unquote(entity_uri)
-        
-        # Create graph URI
-        if graph_name == 'default':
-            graph_uri = 'http://localhost:8080/graph/default'
-        else:
-            graph_uri = f'http://localhost:8080/graph/{graph_name}'
+        graph_uri = _resolve_graph_uri(graph_name)
         
         # Get parameters
         depth = int(request.args.get('depth', 1))
@@ -725,16 +741,9 @@ def get_entity_literals(graph_name: str, entity_uri: str):
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         sys.path.append(backend_dir)
         from virtuoso import query_sparql
-        from urllib.parse import unquote
-        
         # Decode the entity URI
         entity_uri = unquote(entity_uri)
-        
-        # Create graph URI
-        if graph_name == 'default':
-            graph_uri = 'http://localhost:8080/graph/default'
-        else:
-            graph_uri = f'http://localhost:8080/graph/{graph_name}'
+        graph_uri = _resolve_graph_uri(graph_name)
         
         # SPARQL query to get literal properties
         sparql_query = SPARQLQueries.get_query('GET_ENTITY_LITERALS',
@@ -783,19 +792,20 @@ def delete_graph(graph_name: str):
         sys.path.append(backend_dir)
         from virtuoso import query_sparql
         
-        # Create graph URI
-        if graph_name == 'default':
-            graph_uri = 'http://localhost:8080/graph/default'
-        else:
-            graph_uri = f'http://localhost:8080/graph/{graph_name}'
+        graph_uri = _resolve_graph_uri(graph_name)
         
         # First, check how many triples are in the graph
         count_query = SPARQLQueries.get_query('COUNT_GRAPH_TRIPLES', graph_uri=graph_uri)
-        count_result = query_sparql(count_query, timeout_seconds=60)
-        
-        total_triples = 0
-        if count_result and len(count_result) > 0:
-            total_triples = int(count_result[0]['count']['value'])
+
+        def _get_remaining_triples() -> int:
+            count_result = query_sparql(count_query, timeout_seconds=60)
+            if count_result is None:
+                raise RuntimeError("Failed to query graph triple count")
+            if not count_result:
+                return 0
+            return int(count_result[0]['count']['value'])
+
+        total_triples = _get_remaining_triples()
         
         logger.info(f"Starting deletion of graph {graph_uri} with {total_triples} triples")
         
@@ -808,6 +818,8 @@ def delete_graph(graph_name: str):
             # For large graphs, use chunked deletion
             batch_size = 10000
             deleted_batches = 0
+            previous_remaining = total_triples
+            stalled_batches = 0
             
             while True:
                 # Delete a batch of triples
@@ -815,16 +827,25 @@ def delete_graph(graph_name: str):
                                                     graph_uri=graph_uri, 
                                                     batch_size=batch_size)
                 
-                result = query_sparql(batch_query, timeout_seconds=120)
+                query_sparql(batch_query, timeout_seconds=120)
                 deleted_batches += 1
                 
                 # Check if there are still triples left
-                count_result = query_sparql(count_query, timeout_seconds=60)
-                remaining = 0
-                if count_result and len(count_result) > 0:
-                    remaining = int(count_result[0]['count']['value'])
+                remaining = _get_remaining_triples()
                 
                 logger.info(f"Deleted batch {deleted_batches}, remaining triples: {remaining}")
+
+                if remaining >= previous_remaining:
+                    stalled_batches += 1
+                else:
+                    stalled_batches = 0
+                previous_remaining = remaining
+
+                # Abort when no progress is made for several iterations.
+                if stalled_batches >= 3:
+                    raise RuntimeError(
+                        f"Deletion stalled for graph {graph_uri}; remaining triples stay at {remaining}"
+                    )
                 
                 # If no triples left, break
                 if remaining == 0:
@@ -832,8 +853,7 @@ def delete_graph(graph_name: str):
                     
                 # Safety check to prevent infinite loop
                 if deleted_batches > 1000:  # Max 10 million triples in 1000 batches
-                    logger.warning(f"Deletion stopped after {deleted_batches} batches")
-                    break
+                    raise RuntimeError(f"Deletion stopped after {deleted_batches} batches")
             
             # Finally drop the empty graph to clean up metadata
             try:
@@ -843,6 +863,19 @@ def delete_graph(graph_name: str):
             except Exception as e:
                 logger.warning(f"Failed to clean up graph metadata: {e}")
         
+        remaining_after_delete = _get_remaining_triples()
+        if remaining_after_delete > 0:
+            logger.error(
+                f"Graph deletion incomplete for {graph_uri}: {remaining_after_delete} triples remain"
+            )
+            return jsonify({
+                "success": False,
+                "message": (
+                    f"Deletion incomplete for graph '{graph_name}'. "
+                    f"{remaining_after_delete} triples still remain."
+                )
+            }), 500
+
         logger.info(f"Successfully deleted graph: {graph_uri}")
         return jsonify({
             "success": True,

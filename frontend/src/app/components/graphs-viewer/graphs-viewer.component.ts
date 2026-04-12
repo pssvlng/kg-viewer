@@ -1,21 +1,21 @@
-import { Component, OnInit, ViewChild, AfterViewInit, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule, FormControl, ReactiveFormsModule } from '@angular/forms';
-import { MatCardModule } from '@angular/material/card';
-import { MatTableModule, MatTableDataSource } from '@angular/material/table';
-import { MatPaginatorModule, MatPaginator } from '@angular/material/paginator';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatInputModule } from '@angular/material/input';
+import { AfterViewInit, Component, EventEmitter, Input, OnInit, Output, ViewChild } from '@angular/core';
+import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
+import { MatCardModule } from '@angular/material/card';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
-import { MatDialogModule, MatDialog } from '@angular/material/dialog';
-import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
+import { MatInputModule } from '@angular/material/input';
+import { MatPaginator, MatPaginatorModule } from '@angular/material/paginator';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatTableDataSource, MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
-import { GraphsService, Graph } from '../../services/graphs.service';
-import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component';
 import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
+import { Graph, GraphsService } from '../../services/graphs.service';
 import { ResultsComponent } from '../results/results.component';
+import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component';
 
 @Component({
   selector: 'app-graphs-viewer',
@@ -315,7 +315,7 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
   }
   
   private loadGraphAnalysisData(graph: Graph) {
-    this.graphsService.getGraphAnalysis(graph.name).subscribe({
+    this.graphsService.getGraphAnalysis(graph.name, graph.uri).subscribe({
       next: (response) => {
         if (response.success) {
           // Now emit a single navigation event with the loaded data
@@ -349,11 +349,11 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
         duration: 0 // Keep open until manually closed
       });
       
-      this.graphsService.deleteGraph(graph.name).subscribe({
+      this.graphsService.deleteGraph(graph.name, graph.uri).subscribe({
         next: (response) => {
           this.snackBar.dismiss(); // Close the progress message
           if (response.success) {
-            this.snackBar.open(`Graph "${graph.name}" deleted successfully`, 'Close', { duration: 5000 });
+            this.snackBar.open(response.message || `Graph "${graph.name}" deleted successfully`, 'Close', { duration: 5000 });
             this.loadGraphs(); // Refresh the list
           } else {
             this.snackBar.open(`Failed to delete graph: ${response.message}`, 'Close', { duration: 5000 });

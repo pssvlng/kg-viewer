@@ -1,5 +1,5 @@
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 
@@ -36,11 +36,27 @@ export class GraphsService {
     return this.http.get<GraphsResponse>(`${this.apiUrl}/api/graphs`);
   }
 
-  getGraphAnalysis(graphName: string): Observable<GraphAnalysisResponse> {
-    return this.http.get<GraphAnalysisResponse>(`${this.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/analysis`);
+  getGraphAnalysis(graphName: string, graphUri?: string): Observable<GraphAnalysisResponse> {
+    let params = new HttpParams();
+    if (graphUri) {
+      params = params.set('graphUri', graphUri);
+    }
+
+    return this.http.get<GraphAnalysisResponse>(
+      `${this.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/analysis`,
+      { params }
+    );
   }
 
-  deleteGraph(graphName: string): Observable<{success: boolean, message: string}> {
-    return this.http.delete<{success: boolean, message: string}>(`${this.apiUrl}/api/graphs/${encodeURIComponent(graphName)}`);
+  deleteGraph(graphName: string, graphUri?: string): Observable<{success: boolean, message: string}> {
+    let params = new HttpParams();
+    if (graphUri) {
+      params = params.set('graphUri', graphUri);
+    }
+
+    return this.http.delete<{success: boolean, message: string}>(
+      `${this.apiUrl}/api/graphs/${encodeURIComponent(graphName)}`,
+      { params }
+    );
   }
 }

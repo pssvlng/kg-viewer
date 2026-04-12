@@ -1,7 +1,7 @@
-import { Injectable } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subscription } from 'rxjs';
 import { DataSource } from '@angular/cdk/collections';
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { Injectable } from '@angular/core';
+import { BehaviorSubject, Observable, Subscription } from 'rxjs';
 import { environment } from '../../environments/environment';
 
 export interface PaginationInfo {
@@ -75,13 +75,24 @@ export class ServerSideDataSource extends DataSource<any> {
     });
   }
 
-  loadData(graphName: string, classUri: string, page: number = 1, pageSize: number = 25, filter: string = '') {
+  loadData(
+    graphName: string,
+    classUri: string,
+    page: number = 1,
+    pageSize: number = 25,
+    filter: string = '',
+    graphUri?: string
+  ) {
     this.loadingSubject.next(true);
 
-    const params = new HttpParams()
+    let params = new HttpParams()
       .set('page', (page - 1).toString()) // Convert to 0-based page number for API
       .set('size', pageSize.toString())
       .set('search', filter);
+
+    if (graphUri) {
+      params = params.set('graphUri', graphUri);
+    }
 
     const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/entities/${encodeURIComponent(classUri)}/instances`;
 

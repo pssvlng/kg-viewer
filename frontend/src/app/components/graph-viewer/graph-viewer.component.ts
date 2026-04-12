@@ -1,5 +1,5 @@
-import { Component, OnInit, Input, Output, EventEmitter, ChangeDetectorRef, ViewChild, ElementRef, AfterViewInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, HostListener, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -7,8 +7,8 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatListModule } from '@angular/material/list';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { GraphVisualizationService, GraphData, LiteralProperty } from '../../services/graph-visualization.service';
 import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
+import { GraphData, GraphVisualizationService, LiteralProperty } from '../../services/graph-visualization.service';
 
 declare var cytoscape: any;
 
@@ -291,6 +291,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   @Input() entityUri!: string;
   @Input() entityLabel!: string;
   @Input() graphName!: string;
+  @Input() graphUri?: string;
   @Input() isInContainer: boolean = false;
   @Input() preserveState: any = null; // State to preserve for back navigation
   @Output() contentNavigation = new EventEmitter<ContentNavigationEvent>();
@@ -452,7 +453,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
           
           // Store initial graph data as expansion data for the central node
           // Use depth=1 to ensure we only get immediate connections
-          this.graphService.getEntityGraph(this.graphName, this.entityUri, 1)
+          this.graphService.getEntityGraph(this.graphName, this.entityUri, 1, 'both', this.graphUri)
             .subscribe({
               next: (centralData) => {
                 const normalizedData = {
@@ -478,7 +479,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
   loadGraph(depth: number = 1) {
     this.loading = true;
-    this.graphService.getEntityGraph(this.graphName, this.entityUri, depth)
+    this.graphService.getEntityGraph(this.graphName, this.entityUri, depth, 'both', this.graphUri)
       .subscribe({
         next: (data) => {
           this.graphElements = this.createCytoscapeElements(data);
@@ -577,7 +578,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     }
     
     // Load connected nodes for the clicked node (depth=1 for single level expansion)
-    this.graphService.getEntityGraph(this.graphName, nodeUri, 1)
+    this.graphService.getEntityGraph(this.graphName, nodeUri, 1, 'both', this.graphUri)
       .subscribe({
         next: (newGraphData) => {
           // Store the original expansion data with consistent node structure
@@ -730,14 +731,15 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       data: {
         entityUri: nodeUri,
         entityLabel: nodeLabel,
-        graphName: this.graphName
+        graphName: this.graphName,
+        graphUri: this.graphUri
       },
       title: `Graph: ${nodeLabel}`
     });
   }
 
   loadEntityLiterals(entityUri: string) {
-    this.graphService.getEntityLiterals(this.graphName, entityUri)
+    this.graphService.getEntityLiterals(this.graphName, entityUri, this.graphUri)
       .subscribe({
         next: (literals) => {
           this.selectedNodeLiterals = literals;
@@ -1056,10 +1058,10 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   }
 
   @HostListener('document:keydown.escape', ['$event'])
-  onEscapeKey(event: KeyboardEvent) {
+  onEscapeKey(event: Event) {
     if (this.isFullscreen) {
       this.exitFullscreen();
-      event.preventDefault();
+      (event as KeyboardEvent).preventDefault();
     }
   }
 

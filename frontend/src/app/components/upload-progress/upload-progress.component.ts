@@ -1,10 +1,10 @@
-import { Component, EventEmitter, Input, Output, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Component, EventEmitter, Input, OnDestroy, OnInit, Output } from '@angular/core';
+import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatButtonModule } from '@angular/material/button';
 import { DocumentService, UploadJob } from '../../services/document.service';
 
 @Component({
@@ -311,9 +311,9 @@ export class UploadProgressComponent implements OnInit, OnDestroy {
           message: this.job.result_data.message || "Upload completed successfully",
           graphId: this.job.graph_name,
           graphName: this.job.graph_name,
-          graphUri: `http://localhost:8080/graph/${this.job.graph_name}`,
+          graphUri: this.job.result_data.graphUri || this.job.graph_name,
           triplesCount: this.job.total_triples,
-          sparqlEndpoint: "http://localhost:8890/sparql"
+          sparqlEndpoint: this.job.result_data.sparqlEndpoint || "http://localhost:8890/sparql"
         }
       };
       this.navigationRequested.emit({ 

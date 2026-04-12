@@ -17,8 +17,11 @@ class Config:
     external_frontend_url: str = os.getenv('EXTERNAL_FRONTEND_URL', 'http://localhost:4200')
     
     # Graph configuration
-    graph_base_uri: str = os.getenv('GRAPH_BASE_URI', 'http://example.org') + '/graph'
+    graph_base_uri: str = os.getenv('GRAPH_BASE_URI', '').strip() or 'http://localhost:8080/graph/'
     default_graph_name: str = os.getenv('DEFAULT_GRAPH_NAME', 'default')
+
+    # Public SPARQL endpoint (browser-accessible)
+    sparql_endpoint: str = os.getenv('SPARQL_ENDPOINT', '').strip() or 'http://localhost:8890/sparql'
     
     # Flask settings
     flask_host: str = os.getenv('FLASK_HOST', '0.0.0.0')
@@ -46,20 +49,29 @@ class Config:
     @property
     def default_graph_uri(self) -> str:
         """Get the default graph URI"""
-        return f"{self.graph_base_uri}/{self.default_graph_name}"
+        if self.default_graph_name.startswith('http://') or self.default_graph_name.startswith('https://'):
+            return self.default_graph_name
+
+        base_prefix = self.graph_base_uri.rstrip('/')
+        if not base_prefix.endswith('/graph'):
+            base_prefix = f"{base_prefix}/graph"
+        return f"{base_prefix}/{self.default_graph_name}"
     
     def get_graph_uri(self, graph_name: str) -> str:
         """Get a graph URI for the given graph name"""
-        if graph_name == 'default':
+        if not graph_name or graph_name == 'default':
             return self.default_graph_uri
-        return f"{self.graph_base_uri}/{graph_name}"
+        if graph_name.startswith('http://') or graph_name.startswith('https://'):
+            return graph_name
+
+        base_prefix = self.graph_base_uri.rstrip('/')
+        if not base_prefix.endswith('/graph'):
+            base_prefix = f"{base_prefix}/graph"
+        return f"{base_prefix}/{graph_name}"
     
     def get_external_graph_uri(self, graph_name: str) -> str:
         """Get an external graph URI for the given graph name"""
-        # For external access, we might want to use external URLs
-        if graph_name == 'default':
-            return self.default_graph_uri
-        return f"{self.graph_base_uri}/{graph_name}"
+        return self.get_graph_uri(graph_name)
     
     def to_dict(self) -> dict:
         """Convert config to dictionary for API responses"""
@@ -70,7 +82,7 @@ class Config:
             'external_frontend_url': self.external_frontend_url,
             'graph_base_uri': self.graph_base_uri,
             'default_graph_name': self.default_graph_name,
-            'sparql_endpoint': self.external_virtuoso_sparql_endpoint
+            'sparql_endpoint': self.sparql_endpoint
         }
 
 # Global config instance
