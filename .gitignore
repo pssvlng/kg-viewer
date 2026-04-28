@@ -132,4 +132,4 @@ venv.bak/
 dmypy.json
 .angular
 
-upload_jobs.json
+upload_jobs*.json

@@ -16,6 +16,10 @@ from ...core.exceptions import UploadProcessingException, JobNotFoundException
 logger = logging.getLogger(__name__)
 
 
+_service_instance_lock = threading.Lock()
+_service_instance: Optional['UploadJobService'] = None
+
+
 class UploadJobService:
     """Service for managing upload jobs."""
     
@@ -149,7 +153,7 @@ class UploadJobService:
                         print(f"Starting entity analysis for graph: {graph_uri}")
                         # Query for classes and their instance counts
                         classes_query = SPARQLQueries.get_query('GET_ENTITY_TYPES_FOR_ANALYSIS',
-                                                                graph_uri=graph_uri, limit=50)
+                                                                graph_uri=graph_uri)
                         
                         from virtuoso import query_sparql
                         results = query_sparql(classes_query)
@@ -238,7 +242,23 @@ class UploadJobService:
 
 # Factory function for dependency injection
 def create_upload_service() -> UploadJobService:
-    """Create upload service with default repository."""
-    from ...infrastructure.repositories.job_repository import InMemoryJobRepository
-    repository = InMemoryJobRepository()
-    return UploadJobService(repository)
+    """Create or return a shared upload service instance.
+
+    A singleton instance ensures that upload jobs created in one request
+    are immediately visible to status polling requests in the same process.
+    """
+    global _service_instance
+
+    if _service_instance is not None:
+        return _service_instance
+
+    with _service_instance_lock:
+        if _service_instance is None:
+            from config import config
+            from ...infrastructure.repositories.job_repository import InMemoryJobRepository
+
+            persistence_file = config.upload_jobs_file if config.should_persist_upload_jobs else None
+            repository = InMemoryJobRepository(persistence_file=persistence_file)
+            _service_instance = UploadJobService(repository)
+
+    return _service_instance

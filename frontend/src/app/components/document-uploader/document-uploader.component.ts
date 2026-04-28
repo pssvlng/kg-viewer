@@ -1,11 +1,11 @@
-import { Component, EventEmitter, Input, Output, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Component, ElementRef, EventEmitter, Input, Output, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatInputModule } from '@angular/material/input';
-import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
@@ -29,7 +29,7 @@ import { DocumentService } from '../../services/document.service';
   template: `
     <mat-card>
       <mat-card-header>
-        <mat-card-title>TTL File Upload</mat-card-title>
+        <mat-card-title>Upload TTL File</mat-card-title>
       </mat-card-header>
       
       <mat-card-content>
@@ -60,9 +60,8 @@ import { DocumentService } from '../../services/document.service';
             color="primary"
             [disabled]="isProcessing || disabled"
             (click)="fileInput.click()">
-            <mat-icon *ngIf="!isProcessing">upload_file</mat-icon>
             <mat-spinner *ngIf="isProcessing" diameter="20"></mat-spinner>
-            {{ getUploadButtonText() }}
+            Upload TTL File
           </button>
           
           <span *ngIf="selectedFile && !isProcessing" class="file-name">
@@ -135,21 +134,12 @@ export class DocumentUploaderComponent {
   selectedFile: File | null = null;
   graphName: string = '';
   isProcessing: boolean = false;
+  private readonly allowedExtensions = ['ttl'];
 
   constructor(
     private snackBar: MatSnackBar,
     private documentService: DocumentService
   ) {}
-
-  getUploadButtonText(): string {
-    if (this.isProcessing) {
-      return 'Processing...';
-    }
-    if (this.disabled) {
-      return 'Upload in progress...';
-    }
-    return 'Upload TTL File';
-  }
 
   clearGraphName() {
     this.graphName = '';
@@ -157,10 +147,12 @@ export class DocumentUploaderComponent {
 
   onFileSelected(event: any) {
     const file = event.target.files[0];
-    if (file && file.name.toLowerCase().endsWith('.ttl')) {
+    const extension = this.getFileExtension(file?.name);
+
+    if (file && extension && this.allowedExtensions.includes(extension)) {
       this.selectedFile = file;
       this.newUploadStarted.emit(); // Clear previous results
-      this.snackBar.open('TTL File Selected', 'Close', {
+      this.snackBar.open('File Selected', 'Close', {
         duration: 2000
       });
       // Automatically start upload when file is selected
@@ -172,6 +164,13 @@ export class DocumentUploaderComponent {
       // Reset the file input using our helper method
       this.resetFileInput();
     }
+  }
+
+  private getFileExtension(filename: string): string {
+    if (!filename || !filename.includes('.')) {
+      return '';
+    }
+    return filename.toLowerCase().split('.').pop() || '';
   }
 
   uploadFile() {

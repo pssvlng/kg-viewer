@@ -108,10 +108,10 @@ For development and debugging purposes, you can run the services individually ou
 cd backend
 
 # Install dependencies
-pip install -r requirements.txt
+uv sync
 
 # Run development server
-python app.py
+uv run python app.py
 ```
 
 The backend will be available at `http://localhost:5000`

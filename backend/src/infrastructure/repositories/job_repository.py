@@ -4,6 +4,7 @@ Repository interfaces and implementations for job management.
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
 import json
+import os
 import threading
 from datetime import datetime
 import logging
@@ -41,7 +42,7 @@ class JobRepositoryInterface(ABC):
 class InMemoryJobRepository(JobRepositoryInterface):
     """In-memory implementation of job repository with file persistence."""
     
-    def __init__(self, persistence_file: str = "upload_jobs.json"):
+    def __init__(self, persistence_file: Optional[str] = "upload_jobs.json"):
         self._jobs: Dict[str, UploadJob] = {}
         self._lock = threading.Lock()
         self._persistence_file = persistence_file
@@ -85,9 +86,16 @@ class InMemoryJobRepository(JobRepositoryInterface):
     def _persist_jobs(self) -> None:
         """Persist jobs to file."""
         try:
+            if not self._persistence_file:
+                return
+
             serializable_jobs = {}
             for job_id, job in self._jobs.items():
                 serializable_jobs[job_id] = job.to_dict()
+
+            parent_dir = os.path.dirname(self._persistence_file)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
             
             with open(self._persistence_file, 'w') as f:
                 json.dump(serializable_jobs, f, indent=2)
@@ -98,7 +106,10 @@ class InMemoryJobRepository(JobRepositoryInterface):
     def _load_jobs(self) -> None:
         """Load jobs from file on startup."""
         try:
-            import os
+            if not self._persistence_file:
+                logger.info("Upload job persistence disabled (in-memory mode)")
+                return
+
             if not os.path.exists(self._persistence_file):
                 logger.info("No existing jobs file found")
                 return

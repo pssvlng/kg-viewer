@@ -29,6 +29,11 @@ import { DocumentService, UploadJob } from '../../services/document.service';
       </mat-card-header>
       
       <mat-card-content>
+        <div class="error-message" *ngIf="statusError">
+          <mat-icon>error</mat-icon>
+          <span>{{ statusError }}</span>
+        </div>
+
         <div class="upload-info" *ngIf="job">
           <div class="info-row">
             <strong>Graph Name:</strong>
@@ -198,6 +203,7 @@ export class UploadProgressComponent implements OnInit, OnDestroy {
   
   job: UploadJob | null = null;
   analysisProgress: any = {};
+  statusError: string | null = null;
   private statusInterval: any;
   private analysisInterval: any;
 
@@ -218,6 +224,7 @@ export class UploadProgressComponent implements OnInit, OnDestroy {
     this.statusInterval = setInterval(() => {
       this.documentService.getUploadStatus(this.jobId).subscribe({
         next: (job) => {
+          this.statusError = null;
           this.job = job;
           
           if (job.status === 'success' && job.result_data) {
@@ -232,6 +239,10 @@ export class UploadProgressComponent implements OnInit, OnDestroy {
         },
         error: (error) => {
           console.error('Error fetching job status:', error);
+          if (error?.status === 404) {
+            this.stopPolling();
+            this.statusError = 'Upload job was not found. Please start a new upload.';
+          }
         }
       });
     }, 2000);

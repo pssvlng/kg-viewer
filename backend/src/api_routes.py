@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify
 from typing import Optional
 from urllib.parse import unquote
 from rdflib import Graph
+from rdflib.exceptions import ParserError
 from config import config
 
 # Import new services
@@ -23,6 +24,42 @@ logger = logging.getLogger(__name__)
 
 # Create blueprint for new API endpoints
 api_bp = Blueprint('api', __name__, url_prefix='/api')
+
+SUPPORTED_FILE_EXTENSIONS = {"ttl"}
+PREFERRED_RDF_FORMATS = {
+    "ttl": ["turtle"],
+}
+
+
+def _get_file_extension(filename: str) -> str:
+    if not filename or "." not in filename:
+        return ""
+    return filename.rsplit(".", 1)[-1].lower()
+
+
+def _parse_uploaded_rdf_file(file_storage):
+    filename = file_storage.filename or ""
+    extension = _get_file_extension(filename)
+
+    if extension not in SUPPORTED_FILE_EXTENSIONS:
+        raise ValueError("Unsupported file type. Allowed format: ttl")
+
+    raw_content = file_storage.read()
+    if not raw_content:
+        raise ValueError("Uploaded file is empty")
+
+    parse_errors = []
+    for rdf_format in PREFERRED_RDF_FORMATS.get(extension, []):
+        graph = Graph()
+        try:
+            graph.parse(data=raw_content, format=rdf_format)
+            return graph
+        except (ParserError, Exception) as exc:
+            parse_errors.append(f"{rdf_format}: {exc}")
+
+    raise ValueError(
+        f"Invalid RDF content for .{extension} file. Please upload a valid RDF file in one of the supported formats."
+    )
 
 
 def _resolve_graph_uri(graph_name: str) -> str:
@@ -79,7 +116,7 @@ def get_config():
             "config": {
                 **config.to_dict(),
                 "maxUploadSize": "100MB",
-                "supportedFormats": ["turtle", "rdf", "nt", "n3"],
+                "supportedFormats": ["ttl"],
                 "virtuosoEndpoint": config.virtuoso_sparql_endpoint
             }
         }
@@ -122,16 +159,9 @@ def upload_file():
         if file.filename == '':
             return jsonify({"error": "No file selected"}), 400
             
-        # Validate file type
-        if not file.filename.lower().endswith('.ttl'):
-            return jsonify({"error": "File must be a TTL file"}), 400
-            
+        graph = _parse_uploaded_rdf_file(file)
+
         graph_name = request.form.get('graphName', 'default').strip()
-        
-        # Read and parse TTL file content
-        ttl_content = file.read().decode('utf-8')
-        graph = Graph()
-        graph.parse(data=ttl_content, format='turtle')
         total_triples = len(graph)
         
         # Create upload job and start processing
@@ -151,6 +181,8 @@ def upload_file():
         
         return jsonify(response)
         
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         logger.error(f"Upload failed: {e}")
         return jsonify({"error": f"Upload failed: {str(e)}"}), 500
@@ -253,7 +285,7 @@ def get_graph_analysis(graph_name: str):
         
         # Get class statistics (entity types)
         class_query = SPARQLQueries.get_query('GET_GRAPH_CLASSES_WITH_COUNTS', 
-                                              graph_uri=graph_uri, limit=20)
+                              graph_uri=graph_uri)
         
         class_results = query_sparql(class_query)
         entity_types = []

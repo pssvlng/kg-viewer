@@ -200,7 +200,6 @@ class SPARQLQueries:
     }}
     GROUP BY ?class ?classLabel
     ORDER BY DESC(?count)
-    LIMIT {limit}
     """
     
     GET_CLASS_INSTANCES_PAGINATED = """
@@ -231,7 +230,6 @@ class SPARQLQueries:
     }}
     GROUP BY ?class
     ORDER BY DESC(?count)
-    LIMIT {limit}
     """
     
     COUNT_CLASS_INSTANCES_SIMPLE = """

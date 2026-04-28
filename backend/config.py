@@ -6,9 +6,9 @@ from typing import Optional
 class Config:
     """Application configuration class that reads from environment variables"""
     
-    # Service URLs (internal Docker network)
-    virtuoso_url: str = os.getenv('VIRTUOSO_URL', 'http://virtuoso:8890')
-    lodview_url: str = os.getenv('LODVIEW_URL', 'http://lodview:8080')
+    # Service URLs. Defaults target local host so backend can run outside Docker.
+    virtuoso_url: str = os.getenv('VIRTUOSO_URL', 'http://localhost:8890')
+    lodview_url: str = os.getenv('LODVIEW_URL', 'http://localhost:8080')
     
     # External URLs (browser-accessible)
     external_virtuoso_url: str = os.getenv('EXTERNAL_VIRTUOSO_URL', 'http://localhost:8890')
@@ -35,6 +35,14 @@ class Config:
     # Virtuoso authentication
     virtuoso_user: str = os.getenv('VIRTUOSO_USER', 'dba')
     virtuoso_password: str = os.getenv('DBA_PASSWORD', 'dba')
+
+    # Upload job storage
+    app_data_dir: str = os.getenv('APP_DATA_DIR', '/tmp/kg-viewer')
+    upload_jobs_storage: str = os.getenv('UPLOAD_JOBS_STORAGE', 'file').lower()
+    upload_jobs_file: str = os.getenv(
+        'UPLOAD_JOBS_FILE',
+        os.path.join(os.getenv('APP_DATA_DIR', '/tmp/kg-viewer'), 'upload_jobs.json')
+    )
     
     @property
     def virtuoso_sparql_endpoint(self) -> str:
@@ -72,6 +80,11 @@ class Config:
     def get_external_graph_uri(self, graph_name: str) -> str:
         """Get an external graph URI for the given graph name"""
         return self.get_graph_uri(graph_name)
+
+    @property
+    def should_persist_upload_jobs(self) -> bool:
+        """Whether upload jobs should be persisted to disk."""
+        return self.upload_jobs_storage == 'file'
     
     def to_dict(self) -> dict:
         """Convert config to dictionary for API responses"""
@@ -82,7 +95,8 @@ class Config:
             'external_frontend_url': self.external_frontend_url,
             'graph_base_uri': self.graph_base_uri,
             'default_graph_name': self.default_graph_name,
-            'sparql_endpoint': self.sparql_endpoint
+            'sparql_endpoint': self.sparql_endpoint,
+            'upload_jobs_storage': self.upload_jobs_storage
         }
 
 # Global config instance
