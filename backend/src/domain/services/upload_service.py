@@ -1,7 +1,7 @@
 """
 Service layer for upload job management.
 """
-from typing import Optional, List, Callable
+from typing import Optional, List
 import uuid
 import logging
 import threading
@@ -11,6 +11,8 @@ from rdflib import Graph
 from ...domain.models.upload_job import UploadJob, JobStatus
 from ...infrastructure.repositories.job_repository import JobRepositoryInterface
 from ...infrastructure.constants.sparql_queries import SPARQLQueries
+from ...infrastructure.external.sparql_repository import SPARQLRepositoryInterface
+from ...infrastructure.external.virtuoso_upload_client import VirtuosoUploadClientInterface
 from ...core.exceptions import UploadProcessingException, JobNotFoundException
 
 logger = logging.getLogger(__name__)
@@ -23,8 +25,15 @@ _service_instance: Optional['UploadJobService'] = None
 class UploadJobService:
     """Service for managing upload jobs."""
     
-    def __init__(self, job_repository: JobRepositoryInterface):
+    def __init__(
+        self,
+        job_repository: JobRepositoryInterface,
+        upload_client: VirtuosoUploadClientInterface,
+        sparql_repository: SPARQLRepositoryInterface,
+    ) -> None:
         self._repository = job_repository
+        self._upload_client = upload_client
+        self._sparql_repository = sparql_repository
     
     def create_job(
         self, 
@@ -52,11 +61,11 @@ class UploadJobService:
             )
             
             self._repository.save(job)
-            logger.info(f"Created upload job {job_id} for file {filename}")
+            logger.info("Created upload job %s for file %s", job_id, filename)
             return job
             
         except Exception as e:
-            logger.error(f"Failed to create upload job: {e}")
+            logger.error("Failed to create upload job: %s", e)
             raise UploadProcessingException(f"Failed to create upload job: {str(e)}")
     
     def get_job(self, job_id: str) -> Optional[UploadJob]:
@@ -81,9 +90,9 @@ class UploadJobService:
             job = self.get_job_or_raise(job_id)
             job.update_progress(current_batch, processed_triples)
             self._repository.save(job)
-            logger.debug(f"Updated job {job_id} progress: {job.progress:.1f}%")
+            logger.debug("Updated job %s progress: %.1f%%", job_id, job.progress)
         except Exception as e:
-            logger.error(f"Failed to update job progress {job_id}: {e}")
+            logger.error("Failed to update job progress %s: %s", job_id, e)
             raise UploadProcessingException(f"Failed to update job progress: {str(e)}")
     
     def complete_job(self, job_id: str, result_data: dict) -> None:
@@ -92,9 +101,9 @@ class UploadJobService:
             job = self.get_job_or_raise(job_id)
             job.mark_completed(result_data)
             self._repository.save(job)
-            logger.info(f"Completed job {job_id}")
+            logger.info("Completed job %s", job_id)
         except Exception as e:
-            logger.error(f"Failed to complete job {job_id}: {e}")
+            logger.error("Failed to complete job %s: %s", job_id, e)
             raise UploadProcessingException(f"Failed to complete job: {str(e)}")
     
     def fail_job(self, job_id: str, error_message: str) -> None:
@@ -103,120 +112,104 @@ class UploadJobService:
             job = self.get_job_or_raise(job_id)
             job.mark_failed(error_message)
             self._repository.save(job)
-            logger.warning(f"Failed job {job_id}: {error_message}")
+            logger.warning("Failed job %s: %s", job_id, error_message)
         except Exception as e:
-            logger.error(f"Failed to mark job as failed {job_id}: {e}")
-            # Don't raise exception here as we're already in an error state
+            logger.error("Failed to mark job as failed %s: %s", job_id, e)
+            # Don't raise — we are already handling an error state
     
     def get_all_jobs(self) -> List[UploadJob]:
         """Get all jobs."""
         return self._repository.get_all()
     
-    def process_file(self, job_id: str, graph: Graph) -> None:
-        """Process uploaded file in background."""
-        def _process():
+    def process_file(self, job_id: str, graph: Graph, graph_uri: str) -> None:
+        """Process uploaded file in background using the injected upload client."""
+        def _process() -> None:
             try:
                 job = self.get_job(job_id)
                 if not job:
+                    logger.error("process_file: job %s not found", job_id)
                     return
                 
-                # Import virtuoso functions
-                import sys
-                import os
-                backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                sys.path.append(backend_dir)
-                from virtuoso import storeDataToGraphInBatches
-                from config import config
+                def progress_callback(batch_num: int, processed: int, total: int) -> None:
+                    self.update_job_progress(job_id, batch_num, processed)
                 
-                # Create graph URI
-                if not job.graph_name or job.graph_name.strip() == '' or job.graph_name == 'default':
-                    graph_uri = config.default_graph_uri
-                else:
-                    graph_uri = config.get_graph_uri(job.graph_name)
-                
-                # Progress callback
-                def progress_callback(batch_num, processed_triples, total_triples):
-                    self.update_job_progress(job_id, batch_num, processed_triples)
-                
-                # Upload data with progress tracking
-                success = storeDataToGraphInBatches(
-                    graph_uri, 
-                    graph, 
-                    batch_size=2000, 
-                    progress_callback=progress_callback
+                success = self._upload_client.store_data_in_batches(
+                    graph_uri,
+                    graph,
+                    batch_size=2000,
+                    progress_callback=progress_callback,
                 )
                 
                 if success:
-                    # Get entity type analysis for the uploaded data
-                    entity_types = []
-                    try:
-                        print(f"Starting entity analysis for graph: {graph_uri}")
-                        # Query for classes and their instance counts
-                        classes_query = SPARQLQueries.get_query('GET_ENTITY_TYPES_FOR_ANALYSIS',
-                                                                graph_uri=graph_uri)
-                        
-                        from virtuoso import query_sparql
-                        results = query_sparql(classes_query)
-                        print(f"SPARQL query results: {results}")
-                        
-                        if results and isinstance(results, list):
-                            for binding in results:
-                                class_uri = binding.get('class', {}).get('value', '')
-                                count = int(binding.get('count', {}).get('value', 0))
-                                
-                                # Extract readable name from URI
-                                if '#' in class_uri:
-                                    class_name = class_uri.split('#')[-1]
-                                elif '/' in class_uri:
-                                    class_name = class_uri.split('/')[-1]
-                                else:
-                                    class_name = class_uri
-                                
-                                entity_types.append({
-                                    "label": class_name,
-                                    "uri": class_uri,
-                                    "instanceCount": count
-                                })
-
-                    
-                    except Exception as e:
-                        # Continue with empty analysis if it fails
-                        pass
-                        # Continue with empty analysis if it fails
-                    
-                    # Create proper result data for frontend display
-                    result_data = {
-                        "tabs": [{
-                            "label": "Upload Summary",
-                            "type": "summary",
-                            "content": f"Successfully uploaded {job.total_triples} triples",
-                            "uploadInfo": {
-                                "status": "success",
-                                "message": "Upload completed successfully",
-                                "graphId": job.graph_name,
-                                "graphName": job.graph_name,
-                                "graphUri": graph_uri,
-                                "triplesCount": job.total_triples,
-                                "sparqlEndpoint": config.sparql_endpoint,
-                                "analysisResults": {
-                                    "totalTriples": job.total_triples,
-                                    "foundClassesCount": len(entity_types),
-                                    "classList": entity_types
-                                }
-                            }
-                        }]
-                    }
+                    entity_types = self._analyse_entity_types(graph_uri)
+                    result_data = self._build_result_data(job, graph_uri, entity_types)
                     self.complete_job(job_id, result_data)
                 else:
                     self.fail_job(job_id, "Failed to upload data to Virtuoso")
                     
-            except Exception as e:
-                self.fail_job(job_id, str(e))
+            except Exception as exc:
+                logger.error("Background processing failed for job %s: %s", job_id, exc)
+                self.fail_job(job_id, str(exc))
         
-        # Start processing in background thread
         thread = threading.Thread(target=_process, daemon=True)
         thread.start()
     
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _analyse_entity_types(self, graph_uri: str) -> list:
+        """Query entity types and instance counts for the uploaded graph."""
+        entity_types: list = []
+        try:
+            classes_query = SPARQLQueries.get_query(
+                'GET_ENTITY_TYPES_FOR_ANALYSIS', graph_uri=graph_uri
+            )
+            results = self._sparql_repository.query(classes_query)
+            if results and isinstance(results, list):
+                for binding in results:
+                    class_uri = binding.get('class', {}).get('value', '')
+                    count = int(binding.get('count', {}).get('value', 0))
+                    if '#' in class_uri:
+                        class_name = class_uri.split('#')[-1]
+                    elif '/' in class_uri:
+                        class_name = class_uri.split('/')[-1]
+                    else:
+                        class_name = class_uri
+                    entity_types.append({
+                        "label": class_name,
+                        "uri": class_uri,
+                        "instanceCount": count,
+                    })
+        except Exception as exc:
+            logger.warning("Entity analysis failed for %s (continuing): %s", graph_uri, exc)
+        return entity_types
+
+    @staticmethod
+    def _build_result_data(job: UploadJob, graph_uri: str, entity_types: list) -> dict:
+        from config import config
+        return {
+            "tabs": [{
+                "label": "Upload Summary",
+                "type": "summary",
+                "content": f"Successfully uploaded {job.total_triples} triples",
+                "uploadInfo": {
+                    "status": "success",
+                    "message": "Upload completed successfully",
+                    "graphId": job.graph_name,
+                    "graphName": job.graph_name,
+                    "graphUri": graph_uri,
+                    "triplesCount": job.total_triples,
+                    "sparqlEndpoint": config.sparql_endpoint,
+                    "analysisResults": {
+                        "totalTriples": job.total_triples,
+                        "foundClassesCount": len(entity_types),
+                        "classList": entity_types,
+                    },
+                },
+            }]
+        }
+
     def cleanup_old_jobs(self, max_age_hours: int = 24) -> int:
         """Clean up old completed jobs."""
         try:
@@ -232,20 +225,23 @@ class UploadJobService:
                     deleted_count += 1
             
             if deleted_count > 0:
-                logger.info(f"Cleaned up {deleted_count} old jobs")
+                logger.info("Cleaned up %d old jobs", deleted_count)
             
             return deleted_count
         except Exception as e:
-            logger.error(f"Failed to cleanup old jobs: {e}")
+            logger.error("Failed to cleanup old jobs: %s", e)
             return 0
 
 
-# Factory function for dependency injection
-def create_upload_service() -> UploadJobService:
-    """Create or return a shared upload service instance.
+# ---------------------------------------------------------------------------
+# Factory / singleton — wires up all dependencies once at process startup
+# ---------------------------------------------------------------------------
 
-    A singleton instance ensures that upload jobs created in one request
-    are immediately visible to status polling requests in the same process.
+def create_upload_service() -> UploadJobService:
+    """Return the process-singleton UploadJobService, creating it on first call.
+
+    A singleton ensures that upload jobs created in one request are immediately
+    visible to status-polling requests in the same process.
     """
     global _service_instance
 
@@ -256,9 +252,26 @@ def create_upload_service() -> UploadJobService:
         if _service_instance is None:
             from config import config
             from ...infrastructure.repositories.job_repository import InMemoryJobRepository
+            from ...infrastructure.external.sparql_repository import VirtuosoSPARQLRepository
+            from ...infrastructure.external.virtuoso_upload_client import VirtuosoUploadClient
 
             persistence_file = config.upload_jobs_file if config.should_persist_upload_jobs else None
             repository = InMemoryJobRepository(persistence_file=persistence_file)
-            _service_instance = UploadJobService(repository)
+
+            sparql_repo = VirtuosoSPARQLRepository(
+                sparql_endpoint=config.virtuoso_sparql_endpoint,
+                sparql_auth_endpoint=f"{config.virtuoso_url}/sparql-auth",
+                username=config.virtuoso_user,
+                password=config.virtuoso_password,
+            )
+
+            upload_client = VirtuosoUploadClient(
+                virtuoso_url=config.virtuoso_url,
+                username=config.virtuoso_user,
+                password=config.virtuoso_password,
+            )
+
+            _service_instance = UploadJobService(repository, upload_client, sparql_repo)
 
     return _service_instance
+

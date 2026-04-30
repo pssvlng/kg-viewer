@@ -1,16 +1,19 @@
 import { CommonModule } from '@angular/common';
-import { Component, Inject, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Inject, OnDestroy, OnInit } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 import { Graph, GraphAnalysisResponse, GraphsService } from '../../services/graphs.service';
 import { ResultsComponent } from '../results/results.component';
 
 @Component({
   selector: 'app-graph-analysis-dialog',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     CommonModule,
     MatDialogModule,
@@ -117,40 +120,51 @@ import { ResultsComponent } from '../results/results.component';
     }
   `]
 })
-export class GraphAnalysisDialogComponent implements OnInit {
+export class GraphAnalysisDialogComponent implements OnInit, OnDestroy {
   loading = false;
   error: string | null = null;
   analysisResults: any[] = [];
+  private readonly destroy$ = new Subject<void>();
 
   constructor(
     private dialogRef: MatDialogRef<GraphAnalysisDialogComponent>,
     @Inject(MAT_DIALOG_DATA) public data: { graph: Graph },
     private graphsService: GraphsService,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private cd: ChangeDetectorRef
   ) {}
 
   ngOnInit() {
     this.loadAnalysis();
   }
 
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
   loadAnalysis() {
     this.loading = true;
     this.error = null;
     
-    this.graphsService.getGraphAnalysis(this.data.graph.name, this.data.graph.uri).subscribe(
-      (response: GraphAnalysisResponse) => {
-        this.loading = false;
-        if (response.success) {
-          this.analysisResults = response.tabs || [];
-        } else {
-          this.error = response.error || 'Failed to load graph analysis';
+    this.graphsService.getGraphAnalysis(this.data.graph.name, this.data.graph.uri)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(
+        (response: GraphAnalysisResponse) => {
+          this.loading = false;
+          if (response.success) {
+            this.analysisResults = response.tabs || [];
+          } else {
+            this.error = response.error || 'Failed to load graph analysis';
+          }
+          this.cd.markForCheck();
+        },
+        (error: any) => {
+          this.loading = false;
+          this.error = 'Error loading graph analysis: ' + (error.message || 'Unknown error');
+          console.error('Error loading graph analysis:', error);
+          this.cd.markForCheck();
         }
-      },
-      (error: any) => {
-        this.loading = false;
-        this.error = 'Error loading graph analysis: ' + (error.message || 'Unknown error');
-        console.error('Error loading graph analysis:', error);
-      }
-    );
+      );
   }
 }

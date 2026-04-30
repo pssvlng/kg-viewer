@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, ElementRef, EventEmitter, Input, Output, ViewChild } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, OnDestroy, Output, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -9,11 +9,14 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 import { DocumentService } from '../../services/document.service';
 
 @Component({
   selector: 'app-document-uploader',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     CommonModule,
     FormsModule,
@@ -124,7 +127,7 @@ import { DocumentService } from '../../services/document.service';
     }
   `]
 })
-export class DocumentUploaderComponent {
+export class DocumentUploaderComponent implements OnDestroy {
   @Input() disabled: boolean = false;
   @Output() documentProcessed = new EventEmitter<any>();
   @Output() uploadStarted = new EventEmitter<{jobId: string, filename: string}>();
@@ -135,11 +138,18 @@ export class DocumentUploaderComponent {
   graphName: string = '';
   isProcessing: boolean = false;
   private readonly allowedExtensions = ['ttl'];
+  private readonly destroy$ = new Subject<void>();
 
   constructor(
     private snackBar: MatSnackBar,
-    private documentService: DocumentService
+    private documentService: DocumentService,
+    private cd: ChangeDetectorRef
   ) {}
+
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
 
   clearGraphName() {
     this.graphName = '';
@@ -179,11 +189,14 @@ export class DocumentUploaderComponent {
     }
 
     this.isProcessing = true;
+    this.cd.markForCheck();
 
     this.documentService.uploadFile(this.selectedFile, this.graphName.trim())
+      .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (result) => {
           this.isProcessing = false;
+          this.cd.markForCheck();
           
           // Check if this is the new job-based response
           if (result.jobId) {
@@ -208,6 +221,7 @@ export class DocumentUploaderComponent {
         },
         error: (error) => {
           this.isProcessing = false;
+          this.cd.markForCheck();
           this.snackBar.open('Upload Error: ' + (error.error?.error || error.message), 'Close', {
             duration: 5000
           });

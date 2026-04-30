@@ -1,18 +1,19 @@
-import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { MatToolbarModule } from '@angular/material/toolbar';
+import { ChangeDetectionStrategy, Component, OnInit } from '@angular/core';
 import { MatTabsModule } from '@angular/material/tabs';
-import { DocumentUploaderComponent } from './components/document-uploader/document-uploader.component';
-import { UploadProgressComponent } from './components/upload-progress/upload-progress.component';
-import { ResultsComponent, TabInfo } from './components/results/results.component';
-import { GraphsViewerComponent } from './components/graphs-viewer/graphs-viewer.component';
+import { MatToolbarModule } from '@angular/material/toolbar';
 import { ContentContainerComponent } from './components/content-container/content-container.component';
-import { ContentContainerService } from './services/content-container.service';
+import { DocumentUploaderComponent } from './components/document-uploader/document-uploader.component';
+import { GraphsViewerComponent } from './components/graphs-viewer/graphs-viewer.component';
+import { ResultsComponent } from './components/results/results.component';
 import { UploadManagerComponent } from './components/upload-manager/upload-manager.component';
+import { UploadProgressComponent } from './components/upload-progress/upload-progress.component';
+import { ContentContainerService } from './services/content-container.service';
 
 @Component({
   selector: 'app-root',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     CommonModule,
     MatToolbarModule,

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, HostListener, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
+import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, EventEmitter, HostListener, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -7,6 +7,8 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatListModule } from '@angular/material/list';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
 import { GraphData, GraphVisualizationService, LiteralProperty } from '../../services/graph-visualization.service';
 
@@ -15,6 +17,7 @@ declare var cytoscape: any;
 @Component({
   selector: 'app-graph-viewer',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     CommonModule,
     FormsModule,
@@ -55,6 +58,12 @@ declare var cytoscape: any;
             matTooltip="Include incoming connections when expanding nodes">
             Bidirectional expansion
           </mat-checkbox>
+          <mat-checkbox
+            [(ngModel)]="inPlaceExpansion"
+            (change)="onInPlaceExpansionToggle($event)"
+            matTooltip="Keep existing nodes in their current position when expanding">
+            In place expansion
+          </mat-checkbox>
         </div>
       </div>
       
@@ -71,6 +80,8 @@ declare var cytoscape: any;
           </div>
           
           <mat-spinner *ngIf="loading" class="loading-spinner"></mat-spinner>
+          <div class="cy-tooltip" *ngIf="tooltipVisible"
+               [style.left.px]="tooltipX" [style.top.px]="tooltipY">{{ tooltipText }}</div>
         </div>
         
         <!-- Literals Panel -->
@@ -229,6 +240,21 @@ declare var cytoscape: any;
       word-break: break-all;
     }
     
+    .cy-tooltip {
+      position: absolute;
+      background: rgba(33, 33, 33, 0.92);
+      color: #fff;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      pointer-events: none;
+      z-index: 100;
+      max-width: 320px;
+      word-break: break-word;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+      line-height: 1.4;
+    }
+    
     .graph-container.fullscreen {
       position: fixed;
       top: 0;
@@ -309,8 +335,15 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   expandedNodes = new Set<string>(); // Track which nodes have been expanded
   expandedNodesData = new Map<string, any>(); // Store original expansion data
   includeBidirectionalRelationships = false;
+  inPlaceExpansion = true;
+  tooltipVisible = false;
+  tooltipText = '';
+  tooltipX = 0;
+  tooltipY = 0;
   lastSelectedNode: string | null = null; // Track last clicked node for orange color
   originalEntityUri: string = ''; // Track original entity for reset functionality
+
+  private readonly destroy$ = new Subject<void>();
 
   // Cytoscape configuration
   layout = {
@@ -336,8 +369,8 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     {
       selector: 'node',
       style: {
-        'background-color': '#1976d2',  // Default blue for all nodes
-        'label': 'data(label)',
+        'background-color': '#90caf9',  // Default light blue for all nodes
+        'label': 'data(displayLabel)',
         'width': 50,
         'height': 50,
         'text-valign': 'bottom',
@@ -346,7 +379,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         'font-size': '12px',
         'text-wrap': 'wrap',
         'text-max-width': '80px',
-        'border-color': '#1565c0',
+        'border-color': '#64b5f6',
         'border-width': 2
       }
     },
@@ -374,6 +407,35 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         'border-width': 4,
         'width': 60,
         'height': 60
+      }
+    },
+    {
+      selector: 'node[isAggregate = "true"]',
+      style: {
+        'background-color': '#90caf9',
+        'border-color': '#64b5f6',
+        'border-width': 3,
+        'width': 36,
+        'height': 36,
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': '13px'
+      }
+    },
+    {
+      selector: 'node[isAggregate = "true"][expanded = "true"]',
+      style: {
+        'background-color': '#ff9800',
+        'border-color': '#f57c00',
+        'border-width': 4
+      }
+    },
+    {
+      selector: 'node[isAggregate = "true"]:selected',
+      style: {
+        'background-color': '#ff9800',
+        'border-color': '#f57c00',
+        'border-width': 4
       }
     },
     {
@@ -437,7 +499,11 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         this.onNodeHover(evt);
       });
 
-      
+      this.cy.on('mouseout', 'node', () => {
+        this.tooltipVisible = false;
+        this.cd.detectChanges();
+      });
+
       // Fit and center the graph
       setTimeout(() => {
         if (this.cy) {
@@ -454,6 +520,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
           // Store initial graph data as expansion data for the central node
           // Use depth=1 to ensure we only get immediate connections
           this.graphService.getEntityGraph(this.graphName, this.entityUri, 1, 'both', this.graphUri)
+            .pipe(takeUntil(this.destroy$))
             .subscribe({
               next: (centralData) => {
                 const normalizedData = {
@@ -480,6 +547,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   loadGraph(depth: number = 1) {
     this.loading = true;
     this.graphService.getEntityGraph(this.graphName, this.entityUri, depth, 'both', this.graphUri)
+      .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (data) => {
           this.graphElements = this.createCytoscapeElements(data);
@@ -501,43 +569,77 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
   private createCytoscapeElements(data: GraphData): any[] {
     const elements: any[] = [];
+    const nodeIds = new Set<string>();
+    const edgesBySourceAndPredicate = new Map<string, any[]>();
+    const nodeByUri = new Map<string, any>();
+    data.nodes.forEach(n => nodeByUri.set(n.uri, n));
 
-    // Add nodes
-    data.nodes.forEach(node => {
-      const isCentral = node.isCentral === true || node.uri === this.entityUri;
-      
-      elements.push({
-        data: {
-          id: node.uri,
-          label: node.label || this.getUriFragment(node.uri),
-          uri: node.uri,
-          isCentral: isCentral ? 'true' : 'false',
-          expanded: 'false'  // Initially not expanded
-        }
-      });
-    });
+    const getNodeLabel = (uri: string) => nodeByUri.get(uri)?.label || this.getUriFragment(uri);
+    const addNode = (id: string, label: string, uri: string, isAgg = false) => {
+      if (nodeIds.has(id)) return;
+      const isCentral = !isAgg && (uri === this.entityUri || id === this.entityUri);
+      const displayLabel = isAgg ? label : this.truncateLabel(label);
+      elements.push({ data: { id, label, displayLabel, uri, isCentral: isCentral ? 'true' : 'false', isAggregate: isAgg ? 'true' : 'false', expanded: 'false' } });
+      nodeIds.add(id);
+    };
+    const mkEdge = (id: string, source: string, target: string, label: string, uri: string) =>
+      ({ data: { id, source, target, label, uri } });
 
-    // Add edges
+    addNode(this.entityUri, getNodeLabel(this.entityUri), this.entityUri);
+
     data.edges.forEach(edge => {
-      // Use consistent edge ID format that includes URI and triple-dash separator
-      const edgeId = `${edge.source}---${edge.target}---${edge.uri}`;
-      
-      elements.push({
-        data: {
-          id: edgeId,
-          source: edge.source,
-          target: edge.target,
-          label: edge.label || this.getUriFragment(edge.uri),
-          uri: edge.uri
-        }
-      });
+      const k = `${edge.source}|||${edge.uri}`;
+      if (!edgesBySourceAndPredicate.has(k)) edgesBySourceAndPredicate.set(k, []);
+      edgesBySourceAndPredicate.get(k)!.push(edge);
     });
 
+    edgesBySourceAndPredicate.forEach((groupEdges) => {
+      const uniqueByTarget = new Map<string, any>();
+      groupEdges.forEach(e => { if (!uniqueByTarget.has(e.target)) uniqueByTarget.set(e.target, e); });
+      const uniq = [...uniqueByTarget.values()];
+
+      if (uniq.length > 1) {
+        const src = uniq[0].source;
+        const predUri = uniq[0].uri;
+        const predLabel = uniq[0].label || this.getUriFragment(predUri);
+        const groupKey = `${src}|||${predUri}`;
+        const aggId = `aggregate:::${groupKey}`;
+        const hidden = uniq.map(e => ({ target: e.target, targetLabel: getNodeLabel(e.target), predicateUri: e.uri }));
+        addNode(src, getNodeLabel(src), src);
+        if (!nodeIds.has(aggId)) {
+          elements.push({ data: { id: aggId, label: `${uniq.length}`, displayLabel: `${uniq.length}`, uri: aggId, isCentral: 'false', isAggregate: 'true', expanded: 'false', revealed: 'false', hiddenTargets: hidden } });
+          nodeIds.add(aggId);
+        }
+        elements.push(mkEdge(`${src}---${aggId}---${predUri}`, src, aggId, predLabel, predUri));
+      } else {
+        const e = uniq[0];
+        addNode(e.source, getNodeLabel(e.source), e.source);
+        addNode(e.target, getNodeLabel(e.target), e.target);
+        elements.push(mkEdge(`${e.source}---${e.target}---${e.uri}`, e.source, e.target, e.label || this.getUriFragment(e.uri), e.uri));
+      }
+    });
     return elements;
   }  onNodeClick(event: any) {
+    const nodeId = event.target.id();
     const nodeUri = event.target.data('uri');
     const nodeLabel = event.target.data('label');
-    
+    const isAgg = event.target.data('isAggregate') === 'true';
+
+    if (isAgg) {
+      if (this.cy) this.cy.nodes().unselect();
+      event.target.unselect();
+      const an = this.cy.getElementById(nodeId);
+      if (an.length > 0 && an.data('revealed') !== 'true') {
+        this.revealAggregateTargets(nodeId);
+        an.data('revealed', 'true');
+      }
+      this.expandedNodes.add(nodeId);
+      event.target.data('expanded', 'true');
+      this.selectedNodeLabel = nodeLabel;
+      this.selectedNodeLiterals = [];
+      return;
+    }
+
     // Clear previous selection
     if (this.cy) {
       this.cy.nodes().unselect();
@@ -555,6 +657,41 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     // Load and display node properties
     this.loadEntityLiterals(nodeUri);
     this.selectedNodeLabel = nodeLabel;
+  }
+
+  private revealAggregateTargets(aggregateNodeId: string) {
+    if (!this.cy) return;
+    const an = this.cy.getElementById(aggregateNodeId);
+    if (an.length === 0) return;
+    const hidden = an.data('hiddenTargets') || [];
+    const toAdd: any[] = [];
+
+    hidden.forEach((t: any) => {
+      const tid = t.target;
+      const tl = t.targetLabel || this.getUriFragment(tid);
+      const pu = t.predicateUri;
+      const eid = `${aggregateNodeId}---${tid}---${pu}`;
+      if (this.cy.getElementById(tid).length === 0) {
+        toAdd.push({ data: { id: tid, label: tl, displayLabel: this.truncateLabel(tl), uri: tid, isCentral: tid === this.entityUri ? 'true' : 'false', isAggregate: 'false', expanded: this.expandedNodes.has(tid) ? 'true' : 'false' } });
+      }
+      if (this.cy.getElementById(eid).length === 0) {
+        toAdd.push({ data: { id: eid, source: aggregateNodeId, target: tid, label: '', uri: pu } });
+      }
+    });
+
+    if (toAdd.length > 0) {
+      if (this.inPlaceExpansion) {
+        const existingNodes = this.cy.nodes();
+        existingNodes.lock();
+        this.cy.add(toAdd);
+        const layout = this.cy.layout({ name: 'cose', animate: true, animationDuration: 600, fit: false, padding: 30, nodeRepulsion: 400000, idealEdgeLength: 100, edgeElasticity: 100 });
+        layout.on('layoutstop', () => existingNodes.unlock());
+        layout.run();
+      } else {
+        this.cy.add(toAdd);
+        this.cy.layout({ name: 'cose', animate: true, animationDuration: 600, fit: true, padding: 30, nodeRepulsion: 400000, idealEdgeLength: 100, edgeElasticity: 100 }).run();
+      }
+    }
   }
 
   expandNodeConnections(nodeUri: string) {
@@ -579,6 +716,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     
     // Load connected nodes for the clicked node (depth=1 for single level expansion)
     this.graphService.getEntityGraph(this.graphName, nodeUri, 1, 'both', this.graphUri)
+      .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (newGraphData) => {
           // Store the original expansion data with consistent node structure
@@ -615,113 +753,49 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       return;
     }
 
-    const existingNodeIds = new Set();
-    const existingEdgePairs = new Set(); // Track source-target pairs regardless of direction
+    const existing = new Set<string>();
+    this.cy.elements().forEach((el: any) => existing.add(el.id()));
 
-    // Get existing elements
-    this.cy.nodes().forEach((node: any) => {
-      existingNodeIds.add(node.id());
-    });
-    
-    this.cy.edges().forEach((edge: any) => {
-      const source = edge.data('source');
-      const target = edge.data('target');
-      const uri = edge.data('uri');
-      
-      // Add both directions and include URI for more specific matching
-      existingEdgePairs.add(`${source}|${target}`);
-      existingEdgePairs.add(`${target}|${source}`);
-      existingEdgePairs.add(`${source}|${target}|${uri}`);
-      existingEdgePairs.add(`${target}|${source}|${uri}`);
-    });
+    const incoming = this.createCytoscapeElements(newGraphData);
+    const toAdd = incoming.filter((el: any) => el.data?.id && !existing.has(el.data.id));
 
-    const elementsToAdd: any[] = [];
-
-    // Add new nodes
-    newGraphData.nodes.forEach(node => {
-      if (!existingNodeIds.has(node.uri)) {
-        elementsToAdd.push({
-          data: {
-            id: node.uri,
-            label: node.label,
-            uri: node.uri,
-            isCentral: false, // New nodes are not central
-            expanded: false
-          }
-        });
-      }
-    });
-
-    // Add new edges with comprehensive duplicate checking
-    newGraphData.edges.forEach(edge => {
-      const edgePair1 = `${edge.source}|${edge.target}`;
-      const edgePair2 = `${edge.target}|${edge.source}`;
-      const edgePairWithUri1 = `${edge.source}|${edge.target}|${edge.uri}`;
-      const edgePairWithUri2 = `${edge.target}|${edge.source}|${edge.uri}`;
-      
-      // Check if this edge already exists in any form
-      const edgeExists = existingEdgePairs.has(edgePair1) || 
-                        existingEdgePairs.has(edgePair2) ||
-                        existingEdgePairs.has(edgePairWithUri1) ||
-                        existingEdgePairs.has(edgePairWithUri2);
-      
-      if (!edgeExists) {
-        // Create unique ID that includes all components
-        const uniqueEdgeId = `${edge.source}---${edge.target}---${edge.uri}`;
-        
-        elementsToAdd.push({
-          data: {
-            id: uniqueEdgeId,
-            source: edge.source,
-            target: edge.target,
-            label: edge.label,
-            uri: edge.uri
-          }
-        });
-        
-        // Add to our tracking set to prevent duplicates within this batch
-        existingEdgePairs.add(edgePair1);
-        existingEdgePairs.add(edgePair2);
-        existingEdgePairs.add(edgePairWithUri1);
-        existingEdgePairs.add(edgePairWithUri2);
-      }
-    });
-
-    if (elementsToAdd.length > 0) {
-      // Add new elements to cytoscape
-      this.cy.add(elementsToAdd);
-      
-      // Mark the expanded node as expanded for tracking and coloring
+    if (toAdd.length > 0) {
       this.expandedNodes.add(expandedNodeUri);
       const expandedNode = this.cy.getElementById(expandedNodeUri);
-      if (expandedNode.length > 0) {
-        expandedNode.data('expanded', 'true');
+      if (expandedNode.length > 0) expandedNode.data('expanded', 'true');
+      if (this.inPlaceExpansion) {
+        const existingNodes = this.cy.nodes();
+        existingNodes.lock();
+        this.cy.add(toAdd);
+        const layout = this.cy.layout({ name: 'cose', animate: true, animationDuration: 1000, fit: false, padding: 30, nodeRepulsion: 400000, idealEdgeLength: 100, edgeElasticity: 100 });
+        layout.on('layoutstop', () => existingNodes.unlock());
+        layout.run();
+      } else {
+        this.cy.add(toAdd);
+        this.cy.layout({ name: 'cose', animate: true, animationDuration: 1000, fit: true, padding: 30, nodeRepulsion: 400000, idealEdgeLength: 100, edgeElasticity: 100 }).run();
       }
-      
-      // Run layout to position new nodes
-      const layout = this.cy.layout({
-        name: 'cose',
-        animate: true,
-        animationDuration: 1000,
-        fit: true,
-        padding: 30,
-        nodeRepulsion: 400000,
-        idealEdgeLength: 100,
-        edgeElasticity: 100
-      });
-      layout.run();
     } else {
-      // Still mark as expanded even if no new nodes were found
       this.expandedNodes.add(expandedNodeUri);
       const expandedNode = this.cy.getElementById(expandedNodeUri);
-      if (expandedNode.length > 0) {
-        expandedNode.data('expanded', 'true');
-      }
+      if (expandedNode.length > 0) expandedNode.data('expanded', 'true');
     }
   }
 
   onNodeHover(event: any) {
-    // Could implement hover effects
+    const node = event.target;
+    const fullLabel = node.data('label');
+    // Only show tooltip when the label was actually truncated
+    if (!fullLabel || fullLabel.length <= 50) {
+      this.tooltipVisible = false;
+      this.cd.detectChanges();
+      return;
+    }
+    const pos = node.renderedPosition();
+    this.tooltipText = fullLabel;
+    this.tooltipX = pos.x + 15;
+    this.tooltipY = pos.y - 36;
+    this.tooltipVisible = true;
+    this.cd.detectChanges();
   }
 
   navigateToNode(nodeUri: string, nodeLabel: string) {
@@ -740,6 +814,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
   loadEntityLiterals(entityUri: string) {
     this.graphService.getEntityLiterals(this.graphName, entityUri, this.graphUri)
+      .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (literals) => {
           this.selectedNodeLiterals = literals;
@@ -883,6 +958,19 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     }, 300);
   }
 
+  onInPlaceExpansionToggle(event: any) {
+    this.inPlaceExpansion = event.checked;
+    if (!this.cy) return;
+    if (this.inPlaceExpansion) {
+      // Just fit and center — keep current positions
+      this.cy.fit(undefined, 30);
+      this.cy.center();
+    } else {
+      // Run full optimised layout immediately
+      this.cy.layout({ name: 'cose', animate: true, animationDuration: 800, fit: true, padding: 30, nodeRepulsion: 400000, idealEdgeLength: 100, edgeElasticity: 100 }).run();
+    }
+  }
+
   onBidirectionalToggle(event: any) {
     console.log('Bidirectional toggle changed to:', event.checked);
     console.log('Current expanded nodes:', this.expandedNodes);
@@ -955,106 +1043,47 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   }
 
   refreshExpandedNodes() {
-    if (!this.cy || this.expandedNodesData.size === 0) {
-      return;
-    }
+    if (!this.cy || this.expandedNodesData.size === 0) return;
 
-    console.log('Refreshing expanded nodes with bidirectional:', this.includeBidirectionalRelationships);
-    console.log('Expanded nodes data:', this.expandedNodesData);
-    console.log('Expanded nodes set:', this.expandedNodes);
-
-    // Clear the current graph completely and rebuild from scratch
     this.cy.elements().remove();
-    
-    // Start with the central node
-    console.log(`Creating central node: ${this.entityUri}`);
-    const centralElement = {
+
+    const allElements = new Map<string, any>();
+    allElements.set(this.entityUri, {
       data: {
         id: this.entityUri,
         label: this.entityLabel,
+        displayLabel: this.truncateLabel(this.entityLabel),
         uri: this.entityUri,
-        isCentral: 'true',  // Central node always red
+        isCentral: 'true',
+        isAggregate: 'false',
         expanded: this.expandedNodes.has(this.entityUri) ? 'true' : 'false'
       }
-    };
-    console.log('Central element data:', centralElement.data);
-    
-    // Collections for all nodes and edges
-    const allNodes = new Map<string, any>();
-    const allEdges = new Map<string, any>();
-    
-    // Add central node
-    allNodes.set(this.entityUri, centralElement);
-    
-    // Process each expanded node's data and apply filtering
+    });
+
     this.expandedNodesData.forEach((originalData, expandedNodeUri) => {
-      console.log(`Processing expansion data for node: ${expandedNodeUri}`);
-      
       const filteredData = this.filterGraphData(originalData, expandedNodeUri);
-      
-      // Add all nodes from this expansion
-      filteredData.nodes.forEach((node: any) => {
-        const nodeId = node.uri || node.id;
-        if (!allNodes.has(nodeId)) {
-          const isCentral = nodeId === this.entityUri;
-          console.log(`Adding node to refresh: ${nodeId}, isCentral: ${isCentral}`);
-          
-          allNodes.set(nodeId, {
-            data: {
-              id: nodeId,
-              label: node.label,
-              uri: nodeId,
-              isCentral: isCentral ? 'true' : 'false',
-              expanded: this.expandedNodes.has(nodeId) ? 'true' : 'false'  // Track expansion for coloring
-            }
-          });
-        }
-      });
-      
-      // Add all edges from this expansion
-      filteredData.edges.forEach((edge: any) => {
-        const edgeId = `${edge.source}---${edge.target}---${edge.uri}`;
-        if (!allEdges.has(edgeId)) {
-          allEdges.set(edgeId, {
-            data: {
-              id: edgeId,
-              source: edge.source,
-              target: edge.target,
-              label: edge.label,
-              uri: edge.uri
-            }
-          });
-        }
+      const elems = this.createCytoscapeElements(filteredData);
+      elems.forEach((el: any) => {
+        const eid = el.data?.id;
+        if (!eid || allElements.has(eid)) return;
+        const isNode = !el.data.source;
+        if (isNode) el.data.expanded = this.expandedNodes.has(eid) ? 'true' : 'false';
+        allElements.set(eid, el);
       });
     });
-    
-    // Convert maps to arrays and add to cytoscape
-    const elementsToAdd = [...allNodes.values(), ...allEdges.values()];
-    
-    console.log('Adding elements to cytoscape:', elementsToAdd.length);
-    console.log('Nodes:', allNodes.size, 'Edges:', allEdges.size);
-    
-    if (elementsToAdd.length > 0) {
-      this.cy.add(elementsToAdd);
-      
-      // Restore selection state for the last selected node
-      if (this.lastSelectedNode && this.cy.getElementById(this.lastSelectedNode).length > 0) {
-        this.cy.getElementById(this.lastSelectedNode).select();
-      }
-      
-      // Run layout
-      const layout = this.cy.layout({
-        name: 'cose',
-        animate: true,
-        animationDuration: 1000,
-        fit: true,
-        padding: 30,
-        nodeRepulsion: 400000,
-        idealEdgeLength: 100,
-        edgeElasticity: 100
-      });
-      layout.run();
+
+    const arr = [...allElements.values()];
+    const nodeIdSet = new Set<string>();
+    arr.forEach(el => { if (!el.data?.source) nodeIdSet.add(el.data?.id); });
+    const toAdd = arr.filter(el => !el.data?.source || (nodeIdSet.has(el.data.source) && nodeIdSet.has(el.data.target)));
+
+    this.cy.add(toAdd);
+
+    if (this.lastSelectedNode && this.cy.getElementById(this.lastSelectedNode).length > 0) {
+      this.cy.getElementById(this.lastSelectedNode).select();
     }
+
+    this.cy.layout({ name: 'cose', animate: true, animationDuration: 1000, fit: true, padding: 30, nodeRepulsion: 400000, idealEdgeLength: 100, edgeElasticity: 100 }).run();
   }
 
   @HostListener('document:keydown.escape', ['$event'])
@@ -1066,6 +1095,8 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   }
 
   ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
     // Clean up fullscreen state if component is destroyed while in fullscreen
     if (this.isFullscreen) {
       document.body.style.overflow = '';
@@ -1126,5 +1157,10 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     // Extract the part after the last # or /
     const parts = uri.split(/[#/]/);
     return parts[parts.length - 1] || uri;
+  }
+
+  truncateLabel(label: string, max = 50): string {
+    if (!label) return label;
+    return label.length > max ? label.substring(0, max) + '\u2026' : label;
   }
 }

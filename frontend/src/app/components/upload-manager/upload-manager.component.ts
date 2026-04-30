@@ -1,14 +1,15 @@
-import { Component, OnInit, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ChangeDetectionStrategy, Component, EventEmitter, OnInit, Output } from '@angular/core';
+import { ContentNavigationEvent } from '../../services/content-navigation.interface';
 import { DocumentUploaderComponent } from '../document-uploader/document-uploader.component';
-import { UploadProgressComponent } from '../upload-progress/upload-progress.component';
-import { ResultsComponent, TabInfo } from '../results/results.component';
 import { GraphViewerComponent } from '../graph-viewer/graph-viewer.component';
-import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
+import { ResultsComponent, TabInfo } from '../results/results.component';
+import { UploadProgressComponent } from '../upload-progress/upload-progress.component';
 
 @Component({
   selector: 'app-upload-manager',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     CommonModule,
     DocumentUploaderComponent,

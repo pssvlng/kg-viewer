@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { AfterViewInit, Component, EventEmitter, Input, OnInit, Output, ViewChild } from '@angular/core';
+import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -8,10 +8,12 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatPaginator, MatPaginatorModule } from '@angular/material/paginator';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTableDataSource, MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
+import { Subject } from 'rxjs';
+import { debounceTime, distinctUntilChanged, finalize, takeUntil } from 'rxjs/operators';
 import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
 import { Graph, GraphsService } from '../../services/graphs.service';
 import { ResultsComponent } from '../results/results.component';
@@ -20,6 +22,7 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
 @Component({
   selector: 'app-graphs-viewer',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     CommonModule,
     FormsModule,
@@ -33,7 +36,8 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
     MatIconModule,
     MatDialogModule,
     MatSnackBarModule,
-    MatTooltipModule
+    MatTooltipModule,
+    MatProgressSpinnerModule
   ],
   template: `
     <mat-card class="graphs-card">
@@ -45,9 +49,11 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
               <button mat-raised-button 
                       color="primary"
                       (click)="refreshGraphs()"
+                      [disabled]="loading"
                       matTooltip="Refresh Graphs"
                       class="refresh-btn">
-                <mat-icon>refresh</mat-icon>
+                <mat-spinner *ngIf="loading" diameter="18" class="btn-spinner"></mat-spinner>
+                <mat-icon *ngIf="!loading">refresh</mat-icon>
                 Refresh
               </button>
             </div>
@@ -98,8 +104,10 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
                 <button mat-icon-button 
                         class="view-btn"
                         (click)="viewGraphAnalysis(graph)"
+                        [disabled]="loadingAnalysisGraphUri === graph.uri"
                         matTooltip="View Graph Details">
-                  <mat-icon>visibility</mat-icon>
+                  <mat-spinner *ngIf="loadingAnalysisGraphUri === graph.uri" diameter="20"></mat-spinner>
+                  <mat-icon *ngIf="loadingAnalysisGraphUri !== graph.uri">visibility</mat-icon>
                 </button>
                 <button mat-icon-button 
                         class="delete-btn"
@@ -153,6 +161,10 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
       display: flex;
       align-items: center;
       gap: 8px;
+    }
+    
+    .btn-spinner {
+      display: inline-block;
     }
     
     .filter-section {
@@ -219,7 +231,7 @@ import { GraphAnalysisDialogComponent } from './graph-analysis-dialog.component'
     }
   `]
 })
-export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavigable {
+export class GraphsViewerComponent implements OnInit, AfterViewInit, OnDestroy, ContentNavigable {
   @ViewChild(MatPaginator) paginator!: MatPaginator;
   
   @Input() useContainerNavigation = false;
@@ -229,11 +241,16 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
   dataSource = new MatTableDataSource<Graph>([]);
   displayedColumns = ['name', 'uri', 'actions'];
   filterControl = new FormControl('');
+  loading = false;
+  loadingAnalysisGraphUri: string | null = null;
+
+  private readonly destroy$ = new Subject<void>();
 
   constructor(
     private graphsService: GraphsService,
     private dialog: MatDialog,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private cd: ChangeDetectorRef
   ) {
     // Initialize with empty array to prevent filter errors
     this.dataSource.data = [];
@@ -248,10 +265,20 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
     this.dataSource.paginator = this.paginator;
   }
 
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  trackByGraphUri(_index: number, graph: Graph): string {
+    return graph.uri;
+  }
+
   setupFiltering() {
     this.filterControl.valueChanges.pipe(
       debounceTime(300),
-      distinctUntilChanged()
+      distinctUntilChanged(),
+      takeUntil(this.destroy$)
     ).subscribe(filterValue => {
       this.applyFilter(filterValue || '');
     });
@@ -275,15 +302,20 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
   }
 
   loadGraphs() {
-    this.graphsService.getGraphs().subscribe({
+    this.loading = true;
+    this.cd.markForCheck();
+    this.graphsService.getGraphs().pipe(
+      finalize(() => {
+        this.loading = false;
+        this.cd.markForCheck();
+      }),
+      takeUntil(this.destroy$)
+    ).subscribe({
       next: (response) => {
-        console.log('Graphs API response:', response);
         if (response.success && Array.isArray(response.graphs)) {
           this.graphs = response.graphs;
           this.dataSource.data = this.graphs;
-          console.log('Loaded graphs:', this.graphs);
         } else {
-          console.error('Invalid response format:', response);
           this.snackBar.open('Failed To Load Graphs', 'Close', { duration: 3000 });
         }
       },
@@ -296,15 +328,12 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
 
   refreshGraphs() {
     this.loadGraphs();
-    this.snackBar.open('Graphs Refreshed', 'Close', { duration: 2000 });
   }
 
   viewGraphAnalysis(graph: Graph) {
     if (this.useContainerNavigation) {
-      // Load the graph analysis data first, then navigate with the loaded data
       this.loadGraphAnalysisData(graph);
     } else {
-      // Use existing dialog system
       const dialogRef = this.dialog.open(GraphAnalysisDialogComponent, {
         width: '90vw',
         maxWidth: '1200px',
@@ -315,10 +344,17 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
   }
   
   private loadGraphAnalysisData(graph: Graph) {
-    this.graphsService.getGraphAnalysis(graph.name, graph.uri).subscribe({
+    this.loadingAnalysisGraphUri = graph.uri;
+    this.cd.markForCheck();
+    this.graphsService.getGraphAnalysis(graph.name, graph.uri).pipe(
+      finalize(() => {
+        this.loadingAnalysisGraphUri = null;
+        this.cd.markForCheck();
+      }),
+      takeUntil(this.destroy$)
+    ).subscribe({
       next: (response) => {
         if (response.success) {
-          // Now emit a single navigation event with the loaded data
           this.contentNavigation.emit({
             action: 'push',
             component: ResultsComponent,
@@ -344,23 +380,24 @@ export class GraphsViewerComponent implements OnInit, AfterViewInit, ContentNavi
 
   deleteGraph(graph: Graph) {
     if (confirm(`Are you sure you want to delete the graph "${graph.name}"? This may take several minutes for large graphs.`)) {
-      // Show initial progress message
       this.snackBar.open(`Deleting graph "${graph.name}"... This may take several minutes.`, 'Close', { 
-        duration: 0 // Keep open until manually closed
+        duration: 0
       });
       
-      this.graphsService.deleteGraph(graph.name, graph.uri).subscribe({
+      this.graphsService.deleteGraph(graph.name, graph.uri).pipe(
+        takeUntil(this.destroy$)
+      ).subscribe({
         next: (response) => {
-          this.snackBar.dismiss(); // Close the progress message
+          this.snackBar.dismiss();
           if (response.success) {
             this.snackBar.open(response.message || `Graph "${graph.name}" deleted successfully`, 'Close', { duration: 5000 });
-            this.loadGraphs(); // Refresh the list
+            this.loadGraphs();
           } else {
             this.snackBar.open(`Failed to delete graph: ${response.message}`, 'Close', { duration: 5000 });
           }
         },
         error: (error) => {
-          this.snackBar.dismiss(); // Close the progress message
+          this.snackBar.dismiss();
           console.error('Error deleting graph:', error);
           this.snackBar.open(`Error deleting graph: ${error.error?.message || error.message}`, 'Close', { duration: 5000 });
         }

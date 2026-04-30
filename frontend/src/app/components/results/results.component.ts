@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { AfterViewInit, Component, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, QueryList, SimpleChanges, ViewChild, ViewChildren } from '@angular/core';
+import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, QueryList, SimpleChanges, ViewChild, ViewChildren } from '@angular/core';
 import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -13,7 +13,8 @@ import { MatSort, MatSortModule } from '@angular/material/sort';
 import { MatTableDataSource, MatTableModule } from '@angular/material/table';
 import { MatTabGroup, MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { timeout } from 'rxjs/operators';
+import { Subject } from 'rxjs';
+import { takeUntil, timeout } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { ContentNavigable, ContentNavigationEvent } from '../../services/content-navigation.interface';
 import { DocumentService } from '../../services/document.service';
@@ -58,6 +59,7 @@ export interface TabInfo {
 @Component({
   selector: 'app-results',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     CommonModule,
     FormsModule,
@@ -747,6 +749,8 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   @Output() newUploadRequested = new EventEmitter<void>();
   @Output() contentNavigation = new EventEmitter<ContentNavigationEvent>();
   @Output() viewEntityGraphRequested = new EventEmitter<any>();
+
+  private readonly destroy$ = new Subject<void>();
   
   tabs: TabInfo[] = [];
   dataSources = new Map<string, MatTableDataSource<any>>();
@@ -769,7 +773,8 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     private serverSideDataSourceService: ServerSideDataSourceService,
     private http: HttpClient,
     private documentService: DocumentService,
-    private graphsService: GraphsService
+    private graphsService: GraphsService,
+    private cd: ChangeDetectorRef
   ) {
   }
 
@@ -838,10 +843,11 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
 
   async loadAvailableGraphs() {
     try {
-      this.graphsService.getGraphs().subscribe(response => {
+      this.graphsService.getGraphs().pipe(takeUntil(this.destroy$)).subscribe(response => {
         if (response.success && response.graphs) {
           this.availableGraphs = response.graphs.map(graph => graph.name);
           console.log('Available graphs loaded:', this.availableGraphs);
+          this.cd.markForCheck();
         }
       });
     } catch (error) {
@@ -913,7 +919,10 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   }
 
   getEntityTypesDataSource(classList: any[] | undefined): MatTableDataSource<any> {
-    return new MatTableDataSource(classList || []);
+    const sorted = (classList || []).slice().sort((a, b) =>
+      (a.label || '').localeCompare(b.label || '')
+    );
+    return new MatTableDataSource(sorted);
   }
 
   trackByFn(index: number, item: TabInfo): string {
@@ -1110,12 +1119,10 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   }
 
   private sortEntityTypes(entityTypes: any[]): any[] {
-    // Separate entity types into two groups: owl# types and others
     const owlTypes = entityTypes.filter(entityType => entityType.label && entityType.label.startsWith('owl#'));
     const otherTypes = entityTypes.filter(entityType => !entityType.label || !entityType.label.startsWith('owl#'));
-    
-    // Return other types first, then owl# types
-    return [...otherTypes, ...owlTypes];
+    const byLabel = (a: any, b: any) => (a.label || '').localeCompare(b.label || '');
+    return [...otherTypes.sort(byLabel), ...owlTypes.sort(byLabel)];
   }
 
   getTotalEntities(classesData: any[]): number {
@@ -1288,7 +1295,8 @@ LIMIT 1000`;
     });
     
     this.http.get<any>(url, { params }).pipe(
-      timeout(30000) // 30 second timeout
+      timeout(30000), // 30 second timeout
+      takeUntil(this.destroy$)
     ).subscribe({
       next: (response) => {
         // Create MatTableDataSource with results
@@ -1303,6 +1311,7 @@ LIMIT 1000`;
           pageIndex: 0,
           pageSize: 25
         });
+        this.cd.markForCheck();
       },
       error: (error) => {
         console.error('Search error:', error);
@@ -1425,6 +1434,8 @@ LIMIT 1000`;
   }
   
   ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
     console.log('Component destroying, cleaning up subscriptions');
     
     // Clean up loading subscriptions

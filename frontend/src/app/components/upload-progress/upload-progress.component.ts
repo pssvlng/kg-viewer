@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, OnDestroy, OnInit, Output } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, OnInit, Output } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
@@ -10,6 +10,7 @@ import { DocumentService, UploadJob } from '../../services/document.service';
 @Component({
   selector: 'app-upload-progress',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     CommonModule,
     MatCardModule,
@@ -207,7 +208,7 @@ export class UploadProgressComponent implements OnInit, OnDestroy {
   private statusInterval: any;
   private analysisInterval: any;
 
-  constructor(private documentService: DocumentService) {}
+  constructor(private documentService: DocumentService, private cd: ChangeDetectorRef) {}
 
   ngOnInit() {
     if (this.jobId) {
@@ -226,6 +227,7 @@ export class UploadProgressComponent implements OnInit, OnDestroy {
         next: (job) => {
           this.statusError = null;
           this.job = job;
+          this.cd.markForCheck();
           
           if (job.status === 'success' && job.result_data) {
             // Job completed with results
@@ -242,6 +244,7 @@ export class UploadProgressComponent implements OnInit, OnDestroy {
           if (error?.status === 404) {
             this.stopPolling();
             this.statusError = 'Upload job was not found. Please start a new upload.';
+            this.cd.markForCheck();
           }
         }
       });
