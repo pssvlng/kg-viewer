@@ -21,6 +21,20 @@ RUN uv sync --frozen --no-dev || uv sync --no-dev
 # Copy application code
 COPY . .
 
+# Run as non-root for security
+RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 5000
 
-CMD ["uv", "run", "python", "app.py"]
+# Use gunicorn for production; number of workers configurable via GUNICORN_WORKERS
+CMD ["uv", "run", "gunicorn", \
+    "--workers", "1", \
+    "--worker-class", "gthread", \
+    "--threads", "4", \
+    "--bind", "0.0.0.0:5000", \
+    "--timeout", "120", \
+    "--access-logfile", "-", \
+    "--error-logfile", "-", \
+    "--log-level", "info", \
+    "app:app"]

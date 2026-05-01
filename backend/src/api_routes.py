@@ -181,7 +181,7 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
             logger.error("Upload failed: %s", exc)
-            return jsonify({"error": f"Upload failed: {str(exc)}"}), 500
+            return jsonify({"error": "Upload service error"}), 500
 
     @api_bp.route("/upload/status/<job_id>", methods=["GET"])
     def get_upload_status(job_id: str):
@@ -194,7 +194,7 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
             return jsonify(response.model_dump(by_alias=True))
         except Exception as exc:
             logger.error("Job status failed: %s", exc)
-            return jsonify({"error": f"Service error: {str(exc)}"}), 500
+            return jsonify({"error": "Service error"}), 500
 
     @api_bp.route("/upload/analysis_progress/<job_id>", methods=["GET"])
     def get_analysis_progress(job_id: str):
@@ -236,7 +236,7 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
 
         except Exception as exc:
             logger.error("Get graphs failed: %s", exc)
-            return jsonify({"success": False, "graphs": [], "count": 0, "error": str(exc)})
+            return jsonify({"success": False, "graphs": [], "count": 0, "error": "Service error"})
 
     # ------------------------------------------------------------------
     # Graph analysis
@@ -329,7 +329,7 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
             })
         except Exception as exc:
             logger.error("Graph analysis failed: %s", exc)
-            return jsonify({"error": f"Graph analysis failed: {str(exc)}"}), 500
+            return jsonify({"error": "Service error"}), 500
 
     # ------------------------------------------------------------------
     # Entity instances (paginated)
@@ -423,7 +423,7 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
 
         except Exception as exc:
             logger.error("Entity instances query failed: %s", exc)
-            return jsonify({"error": f"Failed to load entity instances: {str(exc)}"}), 500
+            return jsonify({"error": "Service error"}), 500
 
     # ------------------------------------------------------------------
     # Search
@@ -464,7 +464,7 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
             })
         except Exception as exc:
             logger.error("Graph search failed: %s", exc)
-            return jsonify({"error": f"Search failed: {str(exc)}"}), 500
+            return jsonify({"error": "Service error"}), 500
 
     # ------------------------------------------------------------------
     # Entity graph visualisation
@@ -571,7 +571,7 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
 
         except Exception as exc:
             logger.error("Entity graph query failed: %s", exc)
-            return jsonify({"error": f"Failed to load entity graph: {str(exc)}"}), 500
+            return jsonify({"error": "Service error"}), 500
 
     # ------------------------------------------------------------------
     # Entity literals
@@ -603,7 +603,7 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
 
         except Exception as exc:
             logger.error("Entity literals query failed: %s", exc)
-            return jsonify({"error": f"Failed to load entity literals: {str(exc)}"}), 500
+            return jsonify({"error": "Service error"}), 500
 
     # ------------------------------------------------------------------
     # Graph deletion
@@ -680,7 +680,16 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
 
         except Exception as exc:
             logger.error("Delete graph failed: %s", exc)
-            return jsonify({"success": False, "message": f"Failed to delete graph: {str(exc)}"}), 500
+            return jsonify({"success": False, "message": "Service error"}), 500
+
+    @api_bp.app_errorhandler(429)
+    def rate_limit_handler(e):
+        return jsonify({"error": "Too many requests. Please slow down."}), 429
+
+    @api_bp.app_errorhandler(500)
+    def internal_error_handler(e):
+        logger.error("Unhandled server error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
     return api_bp
 

@@ -1,5 +1,5 @@
-import { CommonModule } from '@angular/common';
-import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, EventEmitter, HostListener, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
+import { CommonModule, DOCUMENT } from '@angular/common';
+import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, EventEmitter, HostListener, Inject, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -259,18 +259,21 @@ declare var cytoscape: any;
       position: fixed;
       top: 0;
       left: 0;
-      width: 100vw;
-      height: 100vh;
-      max-height: 100vh;
-      max-width: 100vw;
+      width: 100vw !important;
+      height: 100vh !important;
+      max-height: 100vh !important;
+      max-width: 100vw !important;
       z-index: 9999;
       background: white;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
     
     .graph-container.fullscreen .graph-content {
       width: 100%;
-      height: calc(100vh - 60px);
+      flex: 1;
+      min-height: 0;
       max-width: 100vw;
       overflow: hidden;
       display: flex;
@@ -323,6 +326,8 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   @Output() contentNavigation = new EventEmitter<ContentNavigationEvent>();
   @Output() backRequested = new EventEmitter<void>();
   @ViewChild('cytoscapeContainer', { static: false }) cytoscapeContainer!: ElementRef;
+
+  private _fsPlaceholder: Comment | null = null;
 
   graphElements: any[] = [];
   selectedNodeLiterals: LiteralProperty[] = [];
@@ -457,7 +462,9 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
   constructor(
     private graphService: GraphVisualizationService,
-    private cd: ChangeDetectorRef
+    private cd: ChangeDetectorRef,
+    private el: ElementRef,
+    @Inject(DOCUMENT) private document: Document
   ) {}
 
   ngOnInit() {
@@ -867,12 +874,15 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
   enterFullscreen() {
     this.isFullscreen = true;
-    document.body.style.overflow = 'hidden'; // Prevent body scroll
-    
-    // Force change detection
     this.cd.detectChanges();
-    
-    // Resize cytoscape after entering fullscreen
+
+    // Move the host element to document.body to escape any overflow:auto/hidden ancestor
+    const host = this.el.nativeElement as HTMLElement;
+    this._fsPlaceholder = document.createComment('graph-viewer-fullscreen-placeholder');
+    host.parentNode!.insertBefore(this._fsPlaceholder, host);
+    document.body.appendChild(host);
+    document.body.style.overflow = 'hidden';
+
     setTimeout(() => {
       if (this.cy) {
         this.cy.resize();
@@ -883,9 +893,16 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
   exitFullscreen() {
     this.isFullscreen = false;
-    document.body.style.overflow = ''; // Restore body scroll
-    
-    // Force change detection
+    document.body.style.overflow = '';
+
+    // Return host element to its original position in the DOM
+    const host = this.el.nativeElement as HTMLElement;
+    if (this._fsPlaceholder && this._fsPlaceholder.parentNode) {
+      this._fsPlaceholder.parentNode.insertBefore(host, this._fsPlaceholder);
+      this._fsPlaceholder.parentNode.removeChild(this._fsPlaceholder);
+      this._fsPlaceholder = null;
+    }
+
     this.cd.detectChanges();
     
     // Aggressive container reset and resize approach

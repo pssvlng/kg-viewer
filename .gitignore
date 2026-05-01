@@ -7,6 +7,13 @@
 ehthumbs.db
 Thumbs.db
 
+# Let's Encrypt certificates (never commit private keys)
+certbot/certs/
+certbot/webroot/
+
+# Traefik ACME certificate storage (never commit private keys)
+traefik/acme.json
+
 # IDE and Editor files
 .vscode/
 .idea/
@@ -106,6 +113,10 @@ jspm_packages/
 # dotenv environment variables file
 .env
 .env.test
+
+# Application environment files with real secrets — use .example templates instead
+config/.env.development
+config/.env.production
 
 # Jupyter Notebook
 .ipynb_checkpoints

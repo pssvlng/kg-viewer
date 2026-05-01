@@ -1,5 +1,7 @@
 from flask import Flask
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import os
 import json
 import sys
@@ -10,7 +12,17 @@ from src.api_routes import register_api_routes
 from config import config
 
 app = Flask(__name__)
+
+# Open CORS — the nginx reverse proxy is the security boundary in production
 CORS(app)
+
+# Rate limiting — backed by in-process memory
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["300 per minute"],
+    storage_uri="memory://",
+)
 
 # Configure maximum upload size from config
 app.config['MAX_CONTENT_LENGTH'] = config.max_content_length
@@ -41,4 +53,4 @@ if __name__ == '__main__':
     print("   • GET  /api/upload/status/<job_id> - Job status")
     print("   • GET  /api/graphs - Available graphs")
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host=config.flask_host, port=config.flask_port, debug=config.flask_debug)
