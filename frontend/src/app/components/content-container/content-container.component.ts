@@ -1,11 +1,11 @@
-import { Component, Input, OnInit, OnDestroy, ViewContainerRef, ViewChild, ComponentRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { MatCardModule } from '@angular/material/card';
+import { AfterViewInit, Component, ComponentRef, ElementRef, Input, OnDestroy, OnInit, ViewChild, ViewContainerRef } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
+import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
+import { Subscription } from 'rxjs';
 import { ContentContainerService } from '../../services/content-container.service';
 import { ContentFrame, ContentNavigable } from '../../services/content-navigation.interface';
-import { Subscription } from 'rxjs';
 import { GraphViewerComponent } from '../graph-viewer/graph-viewer.component';
 import { ResultsComponent } from '../results/results.component';
 
@@ -118,7 +118,7 @@ import { ResultsComponent } from '../results/results.component';
     }
   `]
 })
-export class ContentContainerComponent implements OnInit, OnDestroy {
+export class ContentContainerComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() containerId!: string;
   @ViewChild('resultsHost', { read: ViewContainerRef }) resultsHost!: ViewContainerRef;
   @ViewChild('navigatedResultsHost', { read: ViewContainerRef }) navigatedResultsHost!: ViewContainerRef;
@@ -140,8 +140,12 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
   private graphComponentRef: ComponentRef<any> | null = null;
   
   private subscription = new Subscription();
+  private scrollResetTimer: number | null = null;
 
-  constructor(private contentService: ContentContainerService) {}
+  constructor(
+    private contentService: ContentContainerService,
+    private el: ElementRef<HTMLElement>
+  ) {}
 
   ngOnInit() {
     if (!this.containerId) {
@@ -162,7 +166,15 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
     );
   }
 
+  ngAfterViewInit() {
+    this.resetActiveScrollPosition();
+  }
+
   ngOnDestroy() {
+    if (this.scrollResetTimer !== null) {
+      window.clearTimeout(this.scrollResetTimer);
+      this.scrollResetTimer = null;
+    }
     this.subscription.unsubscribe();
     this.clearComponents();
   }
@@ -183,9 +195,12 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
     
     // Wire up navigation events
     if (this.isContentNavigable(this.resultsComponentRef.instance)) {
-      this.resultsComponentRef.instance.contentNavigation?.subscribe((event: any) => {
+      const navSub = this.resultsComponentRef.instance.contentNavigation?.subscribe((event: any) => {
         this.handleNavigationEvent(event);
       });
+      if (navSub) {
+        this.subscription.add(navSub);
+      }
     }
     
     this.resultsComponentRef.changeDetectorRef.detectChanges();
@@ -194,6 +209,7 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
     // Set initial state - index 0 for original component
     this.currentComponentIndex = 0;
     this.componentTitles[0] = frame.title || 'Initial View';
+    this.resetActiveScrollPosition();
   }
 
   getCurrentTitle(): string {
@@ -203,12 +219,11 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
   goBack() {
     if (this.currentComponentIndex > 0) {
       this.currentComponentIndex--;
+      this.resetActiveScrollPosition();
     }
   }
 
   private handleNavigationEvent(event: any) {
-    console.log('Navigation event received:', event);
-    
     if (event.action === 'push') {
       if (event.component === GraphViewerComponent) {
         // Show graph viewer
@@ -238,9 +253,12 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
       
       // Wire up navigation for graph viewing from results
       if (this.isContentNavigable(this.navigatedResultsComponentRef.instance)) {
-        this.navigatedResultsComponentRef.instance.contentNavigation?.subscribe((event: any) => {
+        const navSub = this.navigatedResultsComponentRef.instance.contentNavigation?.subscribe((event: any) => {
           this.handleNavigationEvent(event);
         });
+        if (navSub) {
+          this.subscription.add(navSub);
+        }
       }
       
       this.navigatedResultsComponentRef.changeDetectorRef.detectChanges();
@@ -249,6 +267,7 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
     // Navigate to index 1 (navigated results)
     this.currentComponentIndex = 1;
     this.componentTitles[1] = title || 'Results';
+    this.resetActiveScrollPosition();
   }
 
   private showGraphViewer(data: any, title?: string) {
@@ -269,12 +288,15 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
       
       // Wire up back navigation - listen to the contentNavigation event
       if (this.isContentNavigable(this.graphComponentRef.instance)) {
-        this.graphComponentRef.instance.contentNavigation?.subscribe((event: any) => {
+        const navSub = this.graphComponentRef.instance.contentNavigation?.subscribe((event: any) => {
           if (event.action === 'back') {
             // Simply go back one index
             this.goBack();
           }
         });
+        if (navSub) {
+          this.subscription.add(navSub);
+        }
       }
       
       // Trigger change detection and component initialization
@@ -284,6 +306,7 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
     // Navigate to index 2 (graph view)
     this.currentComponentIndex = 2;
     this.componentTitles[2] = title || 'Graph View';
+    this.resetActiveScrollPosition();
   }
 
   private clearComponents() {
@@ -306,5 +329,22 @@ export class ContentContainerComponent implements OnInit, OnDestroy {
 
   private isContentNavigable(instance: any): instance is ContentNavigable {
     return instance && typeof instance.contentNavigation?.subscribe === 'function';
+  }
+
+  private resetActiveScrollPosition() {
+    if (this.scrollResetTimer !== null) {
+      window.clearTimeout(this.scrollResetTimer);
+    }
+
+    this.scrollResetTimer = window.setTimeout(() => {
+      const contentBodies = this.el.nativeElement.querySelectorAll('.content-body');
+      const activeBody = contentBodies.item(this.currentComponentIndex) as HTMLElement | null;
+      if (activeBody) {
+        activeBody.scrollTop = 0;
+        activeBody.scrollLeft = 0;
+      }
+
+      this.scrollResetTimer = null;
+    }, 0);
   }
 }

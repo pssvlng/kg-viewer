@@ -43,7 +43,7 @@ declare var cytoscape: any;
           <button mat-button (click)="zoomOut()" matTooltip="Zoom Out">
             <mat-icon>zoom_out</mat-icon>
           </button>
-          <button mat-button (click)="resetZoom()" matTooltip="Reset Zoom">
+          <button mat-button (click)="fitToScreen()" matTooltip="Fit to screen">
             <mat-icon>center_focus_strong</mat-icon>
           </button>
           <button mat-button (click)="collapseAll()" matTooltip="Collapse All Expanded Nodes">
@@ -64,13 +64,25 @@ declare var cytoscape: any;
             matTooltip="Keep existing nodes in their current position when expanding">
             In place expansion
           </mat-checkbox>
+          <div class="panel-toggle-row">
+            <button
+              mat-button
+              class="panel-toggle-button"
+              (click)="toggleLiteralsPanel()"
+              [matTooltip]="showLiteralsPanel ? 'Hide attributes panel' : 'Show attributes panel'">
+              <mat-icon>{{ showLiteralsPanel ? 'visibility_off' : 'visibility' }}</mat-icon>
+              {{ showLiteralsPanel ? 'Hide Attributes' : 'Show Attributes' }}
+            </button>
+          </div>
         </div>
       </div>
       
-              <div class="graph-info">
+      <div class="graph-info">
+        <div class="graph-info-text">
           <mat-icon>info</mat-icon>
           Click nodes to expand connections and view properties.
         </div>
+      </div>
       
       <div class="graph-content">
         <div class="graph-main">
@@ -85,7 +97,7 @@ declare var cytoscape: any;
         </div>
         
         <!-- Literals Panel -->
-        <div class="literals-panel" *ngIf="selectedNodeLiterals.length > 0">
+        <div class="literals-panel" *ngIf="showLiteralsPanel && selectedNodeLiterals.length > 0">
           <h4>{{ selectedNodeLabel }}</h4>
           <div class="literals-content">
             <mat-list>
@@ -107,12 +119,36 @@ declare var cytoscape: any;
           </div>
         </div>
       </div>
+
+      <div class="graph-legend-bar" aria-label="Node color legend">
+        <div class="graph-legend">
+          <span class="legend-item">
+            <span class="legend-dot legend-dot-root"></span>
+            Root node
+          </span>
+          <span class="legend-item">
+            <span class="legend-dot legend-dot-expanded"></span>
+            Expanded node
+          </span>
+          <span class="legend-item">
+            <span class="legend-dot legend-dot-unexpanded"></span>
+            Unexpanded node
+          </span>
+        </div>
+      </div>
     </div>
   `,
   styles: [`
+    :host {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
     .graph-container {
-      height: 600px;
-      max-height: 80vh;
+      height: min(72vh, calc(100vh - 180px));
+      min-height: 380px;
+      max-height: 900px;
       display: flex;
       flex-direction: column;
       background: white;
@@ -140,8 +176,59 @@ declare var cytoscape: any;
       font-size: 12px;
       display: flex;
       align-items: center;
-      gap: 4px;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
       flex-shrink: 0;
+    }
+
+    .graph-info-text {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .graph-legend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #444;
+      flex-wrap: wrap;
+      font-size: 11px;
+    }
+
+    .graph-legend-bar {
+      border-top: 1px solid #e0e0e0;
+      background: #fafafa;
+      padding: 4px 12px;
+      flex-shrink: 0;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      border: 1px solid rgba(0, 0, 0, 0.2);
+    }
+
+    .legend-dot-root {
+      background: #f44336;
+    }
+
+    .legend-dot-expanded {
+      background: #fdd835;
+    }
+
+    .legend-dot-unexpanded {
+      background: #90caf9;
     }
     
     .graph-info mat-icon {
@@ -159,11 +246,23 @@ declare var cytoscape: any;
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
+      justify-content: flex-end;
     }
     
     .graph-controls button {
       min-width: auto;
       white-space: nowrap;
+    }
+
+    .panel-toggle-row {
+      width: 100%;
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 2px;
+    }
+
+    .panel-toggle-button {
+      min-width: auto;
     }
     
     .graph-content {
@@ -305,8 +404,26 @@ declare var cytoscape: any;
     }
     
     @media (max-width: 768px) {
+      .graph-container {
+        height: min(68vh, calc(100vh - 140px));
+        min-height: 320px;
+      }
+
       .graph-content {
         flex-direction: column;
+      }
+
+      .graph-info {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .panel-toggle-row {
+        justify-content: flex-start;
+      }
+
+      .graph-legend-bar {
+        padding: 4px 8px;
       }
       
       .literals-panel {
@@ -328,6 +445,11 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   @ViewChild('cytoscapeContainer', { static: false }) cytoscapeContainer!: ElementRef;
 
   private _fsPlaceholder: Comment | null = null;
+  private resizeObserver: ResizeObserver | null = null;
+  private resizeTimer: number | null = null;
+  private overlayContainerEl: HTMLElement | null = null;
+  private overlayContainerPrevZIndex: string | null = null;
+  private pendingTimers = new Set<number>();
 
   graphElements: any[] = [];
   selectedNodeLiterals: LiteralProperty[] = [];
@@ -341,11 +463,12 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   expandedNodesData = new Map<string, any>(); // Store original expansion data
   includeBidirectionalRelationships = false;
   inPlaceExpansion = true;
+  showLiteralsPanel = true;
   tooltipVisible = false;
   tooltipText = '';
   tooltipX = 0;
   tooltipY = 0;
-  lastSelectedNode: string | null = null; // Track last clicked node for orange color
+  lastSelectedNode: string | null = null; // Track last clicked node for selected state
   originalEntityUri: string = ''; // Track original entity for reset functionality
 
   private readonly destroy$ = new Subject<void>();
@@ -374,7 +497,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     {
       selector: 'node',
       style: {
-        'background-color': '#90caf9',  // Default light blue for all nodes
+        'background-color': '#90caf9',  // Light blue for unexpanded nodes
         'label': 'data(displayLabel)',
         'width': 50,
         'height': 50,
@@ -391,16 +514,16 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     {
       selector: 'node[expanded = "true"]',
       style: {
-        'background-color': '#ff9800',  // Orange for expanded nodes
-        'border-color': '#f57c00',
+        'background-color': '#fdd835',  // Yellow for expanded nodes
+        'border-color': '#f9a825',
         'border-width': 3
       }
     },
     {
       selector: 'node:selected',
       style: {
-        'background-color': '#ff9800',  // Orange for selected nodes
-        'border-color': '#f57c00',
+        'background-color': '#fdd835',
+        'border-color': '#f9a825',
         'border-width': 3
       }
     },
@@ -430,16 +553,16 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     {
       selector: 'node[isAggregate = "true"][expanded = "true"]',
       style: {
-        'background-color': '#ff9800',
-        'border-color': '#f57c00',
+        'background-color': '#fdd835',
+        'border-color': '#f9a825',
         'border-width': 4
       }
     },
     {
       selector: 'node[isAggregate = "true"]:selected',
       style: {
-        'background-color': '#ff9800',
-        'border-color': '#f57c00',
+        'background-color': '#fdd835',
+        'border-color': '#f9a825',
         'border-width': 4
       }
     },
@@ -477,11 +600,42 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     // Cytoscape will be initialized after the graph data is loaded
   }
 
+  private scheduleTimeout(callback: () => void, delayMs: number): number {
+    const timerId = window.setTimeout(() => {
+      this.pendingTimers.delete(timerId);
+      callback();
+    }, delayMs);
+    this.pendingTimers.add(timerId);
+    return timerId;
+  }
+
+  private clearPendingTimeouts() {
+    this.pendingTimers.forEach((timerId) => window.clearTimeout(timerId));
+    this.pendingTimers.clear();
+  }
+
+  private destroyCyInstance() {
+    if (!this.cy) {
+      return;
+    }
+
+    try {
+      this.cy.removeAllListeners();
+      this.cy.destroy();
+    } catch (error) {
+      console.warn('Failed to destroy Cytoscape instance cleanly:', error);
+    } finally {
+      this.cy = null;
+    }
+  }
+
   private initializeCytoscape() {
     if (!this.cytoscapeContainer) {
       console.error('Cytoscape container not found');
       return;
     }
+
+    this.destroyCyInstance();
 
     try {
       this.cy = cytoscape({
@@ -511,8 +665,10 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         this.cd.detectChanges();
       });
 
+      this.setupResizeObserver();
+
       // Fit and center the graph
-      setTimeout(() => {
+      this.scheduleTimeout(() => {
         if (this.cy) {
           this.cy.fit();
           this.cy.center();
@@ -563,7 +719,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
           this.cd.detectChanges();
           
           // Initialize cytoscape after data is loaded and DOM is updated
-          setTimeout(() => {
+          this.scheduleTimeout(() => {
             this.initializeCytoscape();
           }, 100);
         },
@@ -578,6 +734,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     const elements: any[] = [];
     const nodeIds = new Set<string>();
     const edgesBySourceAndPredicate = new Map<string, any[]>();
+    const edgesByTargetAndPredicate = new Map<string, any[]>();
     const nodeByUri = new Map<string, any>();
     data.nodes.forEach(n => nodeByUri.set(n.uri, n));
 
@@ -594,15 +751,37 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
     addNode(this.entityUri, getNodeLabel(this.entityUri), this.entityUri);
 
+    const dedupedEdges = new Map<string, any>();
     data.edges.forEach(edge => {
-      const k = `${edge.source}|||${edge.uri}`;
-      if (!edgesBySourceAndPredicate.has(k)) edgesBySourceAndPredicate.set(k, []);
-      edgesBySourceAndPredicate.get(k)!.push(edge);
+      const edgeId = `${edge.source}|||${edge.target}|||${edge.uri}`;
+      if (!dedupedEdges.has(edgeId)) {
+        dedupedEdges.set(edgeId, edge);
+      }
     });
 
+    dedupedEdges.forEach(edge => {
+      const k = `${edge.source}|||${edge.uri}`;
+      const inK = `${edge.target}|||${edge.uri}`;
+      if (!edgesBySourceAndPredicate.has(k)) edgesBySourceAndPredicate.set(k, []);
+      if (!edgesByTargetAndPredicate.has(inK)) edgesByTargetAndPredicate.set(inK, []);
+      edgesBySourceAndPredicate.get(k)!.push(edge);
+      edgesByTargetAndPredicate.get(inK)!.push(edge);
+    });
+
+    const consumedEdges = new Set<string>();
+
+    const consume = (e: any) => {
+      consumedEdges.add(`${e.source}|||${e.target}|||${e.uri}`);
+    };
+
+    const isConsumed = (e: any) => consumedEdges.has(`${e.source}|||${e.target}|||${e.uri}`);
+
     edgesBySourceAndPredicate.forEach((groupEdges) => {
+      const candidateEdges = groupEdges.filter(e => !isConsumed(e));
+      if (candidateEdges.length === 0) return;
+
       const uniqueByTarget = new Map<string, any>();
-      groupEdges.forEach(e => { if (!uniqueByTarget.has(e.target)) uniqueByTarget.set(e.target, e); });
+      candidateEdges.forEach(e => { if (!uniqueByTarget.has(e.target)) uniqueByTarget.set(e.target, e); });
       const uniq = [...uniqueByTarget.values()];
 
       if (uniq.length > 1) {
@@ -610,20 +789,59 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         const predUri = uniq[0].uri;
         const predLabel = uniq[0].label || this.getUriFragment(predUri);
         const groupKey = `${src}|||${predUri}`;
-        const aggId = `aggregate:::${groupKey}`;
-        const hidden = uniq.map(e => ({ target: e.target, targetLabel: getNodeLabel(e.target), predicateUri: e.uri }));
+        const aggId = `aggregate:out:::${groupKey}`;
+        const hidden = uniq.map(e => ({
+          nodeUri: e.target,
+          nodeLabel: getNodeLabel(e.target),
+          predicateUri: e.uri,
+          direction: 'outgoing'
+        }));
         addNode(src, getNodeLabel(src), src);
         if (!nodeIds.has(aggId)) {
           elements.push({ data: { id: aggId, label: `${uniq.length}`, displayLabel: `${uniq.length}`, uri: aggId, isCentral: 'false', isAggregate: 'true', expanded: 'false', revealed: 'false', hiddenTargets: hidden } });
           nodeIds.add(aggId);
         }
         elements.push(mkEdge(`${src}---${aggId}---${predUri}`, src, aggId, predLabel, predUri));
-      } else {
-        const e = uniq[0];
-        addNode(e.source, getNodeLabel(e.source), e.source);
-        addNode(e.target, getNodeLabel(e.target), e.target);
-        elements.push(mkEdge(`${e.source}---${e.target}---${e.uri}`, e.source, e.target, e.label || this.getUriFragment(e.uri), e.uri));
+        uniq.forEach(consume);
       }
+    });
+
+    edgesByTargetAndPredicate.forEach((groupEdges) => {
+      const candidateEdges = groupEdges.filter(e => !isConsumed(e));
+      if (candidateEdges.length === 0) return;
+
+      const uniqueBySource = new Map<string, any>();
+      candidateEdges.forEach(e => { if (!uniqueBySource.has(e.source)) uniqueBySource.set(e.source, e); });
+      const uniq = [...uniqueBySource.values()];
+
+      if (uniq.length > 1) {
+        const tgt = uniq[0].target;
+        const predUri = uniq[0].uri;
+        const predLabel = uniq[0].label || this.getUriFragment(predUri);
+        const groupKey = `${tgt}|||${predUri}`;
+        const aggId = `aggregate:in:::${groupKey}`;
+        const hidden = uniq.map(e => ({
+          nodeUri: e.source,
+          nodeLabel: getNodeLabel(e.source),
+          predicateUri: e.uri,
+          direction: 'incoming'
+        }));
+        addNode(tgt, getNodeLabel(tgt), tgt);
+        if (!nodeIds.has(aggId)) {
+          elements.push({ data: { id: aggId, label: `${uniq.length}`, displayLabel: `${uniq.length}`, uri: aggId, isCentral: 'false', isAggregate: 'true', expanded: 'false', revealed: 'false', hiddenTargets: hidden } });
+          nodeIds.add(aggId);
+        }
+        elements.push(mkEdge(`${aggId}---${tgt}---${predUri}`, aggId, tgt, predLabel, predUri));
+        uniq.forEach(consume);
+      }
+    });
+
+    dedupedEdges.forEach((e) => {
+      if (isConsumed(e)) return;
+      addNode(e.source, getNodeLabel(e.source), e.source);
+      addNode(e.target, getNodeLabel(e.target), e.target);
+      elements.push(mkEdge(`${e.source}---${e.target}---${e.uri}`, e.source, e.target, e.label || this.getUriFragment(e.uri), e.uri));
+      consume(e);
     });
     return elements;
   }  onNodeClick(event: any) {
@@ -674,15 +892,18 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     const toAdd: any[] = [];
 
     hidden.forEach((t: any) => {
-      const tid = t.target;
-      const tl = t.targetLabel || this.getUriFragment(tid);
+      const tid = t.nodeUri || t.target;
+      const tl = t.nodeLabel || t.targetLabel || this.getUriFragment(tid);
       const pu = t.predicateUri;
-      const eid = `${aggregateNodeId}---${tid}---${pu}`;
+      const direction = t.direction || 'outgoing';
+      const source = direction === 'incoming' ? tid : aggregateNodeId;
+      const target = direction === 'incoming' ? aggregateNodeId : tid;
+      const eid = `${source}---${target}---${pu}`;
       if (this.cy.getElementById(tid).length === 0) {
         toAdd.push({ data: { id: tid, label: tl, displayLabel: this.truncateLabel(tl), uri: tid, isCentral: tid === this.entityUri ? 'true' : 'false', isAggregate: 'false', expanded: this.expandedNodes.has(tid) ? 'true' : 'false' } });
       }
       if (this.cy.getElementById(eid).length === 0) {
-        toAdd.push({ data: { id: eid, source: aggregateNodeId, target: tid, label: '', uri: pu } });
+        toAdd.push({ data: { id: eid, source, target, label: '', uri: pu } });
       }
     });
 
@@ -770,16 +991,19 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       this.expandedNodes.add(expandedNodeUri);
       const expandedNode = this.cy.getElementById(expandedNodeUri);
       if (expandedNode.length > 0) expandedNode.data('expanded', 'true');
+
       if (this.inPlaceExpansion) {
         const existingNodes = this.cy.nodes();
         existingNodes.lock();
         this.cy.add(toAdd);
         const layout = this.cy.layout({ name: 'cose', animate: true, animationDuration: 1000, fit: false, padding: 30, nodeRepulsion: 400000, idealEdgeLength: 100, edgeElasticity: 100 });
-        layout.on('layoutstop', () => existingNodes.unlock());
+        layout.on('layoutstop', () => {
+          existingNodes.unlock();
+        });
         layout.run();
       } else {
         this.cy.add(toAdd);
-        this.cy.layout({ name: 'cose', animate: true, animationDuration: 1000, fit: true, padding: 30, nodeRepulsion: 400000, idealEdgeLength: 100, edgeElasticity: 100 }).run();
+        this.cy.layout({ name: 'cose', animate: true, animationDuration: 1000, fit: false, padding: 30, nodeRepulsion: 400000, idealEdgeLength: 100, edgeElasticity: 100 }).run();
       }
     } else {
       this.expandedNodes.add(expandedNodeUri);
@@ -830,6 +1054,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         error: (err) => {
           console.error('Error loading entity literals:', err);
           this.selectedNodeLiterals = [];
+          this.cd.detectChanges();
         }
       });
   }
@@ -847,17 +1072,30 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     }
   }
 
-  resetZoom() {
+  fitToScreen() {
     if (this.cy) {
+      this.applyFitToScreen();
+    }
+  }
+
+  private applyFitToScreen() {
+    if (this.cy) {
+      this.cy.resize();
       this.cy.fit();
       this.cy.center();
+      this.cd.detectChanges();
     }
+  }
+
+  toggleLiteralsPanel() {
+    this.showLiteralsPanel = !this.showLiteralsPanel;
+    this.cd.detectChanges();
+    this.scheduleCyResize();
+    this.scheduleTimeout(() => this.applyFitToScreen(), 90);
   }
 
   collapseAll() {
     if (!this.cy) return;
-    
-    console.log('Collapsing all expanded nodes');
     
     // Reset to original graph by reloading
     this.expandedNodes.clear();
@@ -882,8 +1120,9 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     host.parentNode!.insertBefore(this._fsPlaceholder, host);
     document.body.appendChild(host);
     document.body.style.overflow = 'hidden';
+    this.raiseOverlayZIndexForFullscreen();
 
-    setTimeout(() => {
+    this.scheduleTimeout(() => {
       if (this.cy) {
         this.cy.resize();
         this.cy.fit();
@@ -894,6 +1133,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   exitFullscreen() {
     this.isFullscreen = false;
     document.body.style.overflow = '';
+    this.restoreOverlayZIndex();
 
     // Return host element to its original position in the DOM
     const host = this.el.nativeElement as HTMLElement;
@@ -906,7 +1146,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     this.cd.detectChanges();
     
     // Aggressive container reset and resize approach
-    setTimeout(() => {
+    this.scheduleTimeout(() => {
       if (this.cy && this.cytoscapeContainer) {
         const container = this.cytoscapeContainer.nativeElement;
         const graphContainer = container.closest('.graph-container');
@@ -949,7 +1189,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     }, 50);
     
     // Second attempt with more aggressive reset
-    setTimeout(() => {
+    this.scheduleTimeout(() => {
       if (this.cy && this.cytoscapeContainer) {
         const container = this.cytoscapeContainer.nativeElement;
         
@@ -964,7 +1204,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     }, 150);
     
     // Final resize with complete viewport reset
-    setTimeout(() => {
+    this.scheduleTimeout(() => {
       if (this.cy) {
         // Complete reset to ensure no scroll bars
         this.cy.reset();
@@ -989,10 +1229,6 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   }
 
   onBidirectionalToggle(event: any) {
-    console.log('Bidirectional toggle changed to:', event.checked);
-    console.log('Current expanded nodes:', this.expandedNodes);
-    console.log('Current expanded data keys:', Array.from(this.expandedNodesData.keys()));
-    
     this.includeBidirectionalRelationships = event.checked;
     
     // Only refresh if we have expanded nodes
@@ -1029,7 +1265,6 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         return connectedNodeIds.has(nodeId);
       });
       
-      console.log('Bidirectional mode - filtered to direct connections only');
       return {
         ...graphData,
         nodes: filteredNodes,
@@ -1054,7 +1289,6 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         edges: outwardEdges
       };
       
-      console.log(`Outward mode - filtered to ${filteredNodes.length} nodes and ${outwardEdges.length} edges`);
       return result;
     }
   }
@@ -1111,9 +1345,88 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     }
   }
 
+  @HostListener('window:resize')
+  onWindowResize() {
+    this.scheduleCyResize();
+  }
+
+  private setupResizeObserver() {
+    if (typeof ResizeObserver === 'undefined' || !this.cytoscapeContainer) {
+      return;
+    }
+
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    }
+
+    const container = this.cytoscapeContainer.nativeElement as HTMLElement;
+    this.resizeObserver = new ResizeObserver(() => this.scheduleCyResize());
+    this.resizeObserver.observe(container);
+
+    const graphMain = container.closest('.graph-main');
+    if (graphMain) {
+      this.resizeObserver.observe(graphMain);
+    }
+  }
+
+  private scheduleCyResize() {
+    if (!this.cy) {
+      return;
+    }
+
+    if (this.resizeTimer !== null) {
+      window.clearTimeout(this.resizeTimer);
+    }
+
+    this.resizeTimer = window.setTimeout(() => {
+      if (this.cy) {
+        this.cy.resize();
+      }
+      this.resizeTimer = null;
+    }, 80);
+  }
+
+  private raiseOverlayZIndexForFullscreen() {
+    const overlayContainer = this.document.querySelector('.cdk-overlay-container') as HTMLElement | null;
+    if (!overlayContainer) {
+      return;
+    }
+
+    this.overlayContainerEl = overlayContainer;
+    this.overlayContainerPrevZIndex = overlayContainer.style.zIndex || '';
+    overlayContainer.style.zIndex = '11000';
+  }
+
+  private restoreOverlayZIndex() {
+    if (!this.overlayContainerEl) {
+      return;
+    }
+
+    this.overlayContainerEl.style.zIndex = this.overlayContainerPrevZIndex || '';
+    this.overlayContainerEl = null;
+    this.overlayContainerPrevZIndex = null;
+  }
+
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
+
+    this.clearPendingTimeouts();
+
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
+
+    if (this.resizeTimer !== null) {
+      window.clearTimeout(this.resizeTimer);
+      this.resizeTimer = null;
+    }
+
+    this.destroyCyInstance();
+
+    this.restoreOverlayZIndex();
+
     // Clean up fullscreen state if component is destroyed while in fullscreen
     if (this.isFullscreen) {
       document.body.style.overflow = '';
@@ -1140,7 +1453,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       this.loadGraph(1);
       
       // Restore zoom and pan settings after a short delay
-      setTimeout(() => {
+      this.scheduleTimeout(() => {
         if (this.cy) {
           this.cy.zoom(currentZoom);
           this.cy.pan(currentPan);

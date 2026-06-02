@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, QueryList, SimpleChanges, ViewChild, ViewChildren } from '@angular/core';
+import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, QueryList, SimpleChanges, ViewChild, ViewChildren } from '@angular/core';
 import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -84,7 +84,7 @@ export interface TabInfo {
       </mat-card-header>
       
       <mat-card-content>
-        <mat-tab-group #tabGroup class="results-tabs" [dynamicHeight]="true">
+        <mat-tab-group #tabGroup class="results-tabs" [dynamicHeight]="true" (selectedIndexChange)="onTabChanged()">
           <mat-tab 
             *ngFor="let tab of tabs; trackBy: trackByFn" 
             [label]="tab.label">
@@ -144,9 +144,7 @@ export interface TabInfo {
                       <!-- Entity Name Column -->
                       <ng-container matColumnDef="name">
                         <th mat-header-cell *matHeaderCellDef>Entity Type</th>
-                        <td mat-cell *matCellDef="let element"
-                            [class.clickable-row]="enableEntityNavigation"
-                            (click)="enableEntityNavigation && navigateToEntityType(element.label, element.instanceCount)">
+                        <td mat-cell *matCellDef="let element">
                           {{ element.label }}
                         </td>
                       </ng-container>
@@ -159,7 +157,8 @@ export interface TabInfo {
                       
                       <tr mat-header-row *matHeaderRowDef="['name', 'count']"></tr>
                       <tr mat-row *matRowDef="let row; columns: ['name', 'count'];"
-                          [class.clickable-row]="enableEntityNavigation"></tr>
+                          [class.clickable-row]="enableEntityNavigation"
+                          (click)="enableEntityNavigation && navigateToEntityType(row.label, row.instanceCount)"></tr>
                     </table>
                   </div>
                 </div>
@@ -768,13 +767,16 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   @ViewChildren(MatPaginator) paginators!: QueryList<MatPaginator>;
   @ViewChildren(MatSort) sorts!: QueryList<MatSort>;
   @ViewChild('tabGroup') tabGroup!: MatTabGroup;
+  private scrollResetTimer: number | null = null;
+  private scrollResetFollowupTimer: number | null = null;
 
   constructor(
     private serverSideDataSourceService: ServerSideDataSourceService,
     private http: HttpClient,
     private documentService: DocumentService,
     private graphsService: GraphsService,
-    private cd: ChangeDetectorRef
+    private cd: ChangeDetectorRef,
+    private el: ElementRef<HTMLElement>
   ) {
   }
 
@@ -783,6 +785,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   ngAfterViewInit() {
     // Connect paginators and sorts to data sources after view initialization
     this.connectPaginatorsAndSorts();
+    this.resetContainerScroll();
   }
 
   connectPaginatorsAndSorts() {
@@ -846,7 +849,6 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
       this.graphsService.getGraphs().pipe(takeUntil(this.destroy$)).subscribe(response => {
         if (response.success && response.graphs) {
           this.availableGraphs = response.graphs.map(graph => graph.name);
-          console.log('Available graphs loaded:', this.availableGraphs);
           this.cd.markForCheck();
         }
       });
@@ -915,6 +917,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     
     if (tabIndex !== -1 && this.tabGroup) {
       this.tabGroup.selectedIndex = tabIndex;
+      this.resetContainerScroll();
     }
   }
 
@@ -1166,6 +1169,7 @@ LIMIT 1000`;
     
     if (tabIndex !== -1 && this.tabGroup) {
       this.tabGroup.selectedIndex = tabIndex;
+      this.resetContainerScroll();
     }
   }
 
@@ -1210,7 +1214,58 @@ LIMIT 1000`;
       // Use setTimeout to ensure view is updated
       setTimeout(() => {
         this.tabGroup.selectedIndex = tabIndex;
+        this.resetContainerScroll();
       }, 0);
+    }
+  }
+
+  onTabChanged() {
+    this.resetContainerScroll();
+  }
+
+  private resetContainerScroll() {
+    if (this.scrollResetTimer !== null) {
+      window.clearTimeout(this.scrollResetTimer);
+    }
+    if (this.scrollResetFollowupTimer !== null) {
+      window.clearTimeout(this.scrollResetFollowupTimer);
+      this.scrollResetFollowupTimer = null;
+    }
+
+    this.scrollResetTimer = window.setTimeout(() => {
+      this.applyScrollReset();
+
+      // Run a second pass after tab animation/DOM settling to avoid stale scroll state.
+      this.scrollResetFollowupTimer = window.setTimeout(() => {
+        this.applyScrollReset();
+        this.scrollResetFollowupTimer = null;
+      }, 220);
+
+      this.scrollResetTimer = null;
+    }, 0);
+  }
+
+  private applyScrollReset() {
+    const contentBody = this.el.nativeElement.closest('.content-body') as HTMLElement | null;
+    if (contentBody) {
+      contentBody.scrollTop = 0;
+      contentBody.scrollLeft = 0;
+    }
+
+    const activeTabBody = this.el.nativeElement.querySelector('.mat-mdc-tab-body-active .mat-mdc-tab-body-content') as HTMLElement | null;
+    if (activeTabBody) {
+      activeTabBody.scrollTop = 0;
+      activeTabBody.scrollLeft = 0;
+    }
+
+    const docScroller = this.el.nativeElement.ownerDocument?.scrollingElement as HTMLElement | null;
+    if (docScroller) {
+      docScroller.scrollTop = 0;
+      docScroller.scrollLeft = 0;
+    }
+
+    if (typeof window !== 'undefined') {
+      window.scrollTo(0, 0);
     }
   }
 
@@ -1223,7 +1278,6 @@ LIMIT 1000`;
     if ((!graphName || graphName === 'default') && this.graphInfo) {
       graphName = this.graphInfo.name;
       graphUri = graphUri || this.graphInfo.uri;
-      console.log(`Using current graph context for search: ${graphName}`);
     }
     
     // If still no graph name found, use the first available graph
@@ -1249,11 +1303,9 @@ LIMIT 1000`;
   triggerSearch(tab: TabInfo, searchTerm?: string): void {
     const term = searchTerm?.trim();
     if (!term) {
-      console.log('No search term provided');
       return;
     }
 
-    console.log('Trigger search for term:', term);
     this.performSearch(term, tab);
   }
 
@@ -1380,7 +1432,6 @@ LIMIT 1000`;
   }
   
   onSearchPageChange(event: PageEvent, tab: TabInfo) {
-    console.log('Search page change:', event);
     const currentState = this.searchStates.get(tab.label);
     if (currentState) {
       this.searchStates.set(tab.label, {
@@ -1434,9 +1485,17 @@ LIMIT 1000`;
   }
   
   ngOnDestroy() {
+    if (this.scrollResetTimer !== null) {
+      window.clearTimeout(this.scrollResetTimer);
+      this.scrollResetTimer = null;
+    }
+    if (this.scrollResetFollowupTimer !== null) {
+      window.clearTimeout(this.scrollResetFollowupTimer);
+      this.scrollResetFollowupTimer = null;
+    }
+
     this.destroy$.next();
     this.destroy$.complete();
-    console.log('Component destroying, cleaning up subscriptions');
     
     // Clean up loading subscriptions
     this.searchLoadingSubscriptions.forEach(subscription => {
