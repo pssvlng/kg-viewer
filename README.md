@@ -185,6 +185,22 @@ LIMIT 100
 
 ### Environment Variables
 
+The project uses a root `.env` file for runtime configuration.
+
+1. Copy the template:
+
+```bash
+cp .env.example .env
+```
+
+2. Edit `.env` with your local values.
+
+Notes:
+- `.env` is ignored by Git and must not be committed.
+- `.env.example` is committed as the template.
+- Docker Compose reads `.env` automatically from the repository root.
+- Local backend development also reads `.env` via `backend/config.py`.
+
 - `VIRTUOSO_URL`: Virtuoso server URL (default: `http://localhost:8890`)
 - `FLASK_ENV`: Flask environment (default: `production`)
 

@@ -1,14 +1,63 @@
 import os
+import socket
 from dataclasses import dataclass
-from typing import Optional
+from urllib.parse import urlparse, urlunparse
+
+from dotenv import load_dotenv
+
+
+def _load_environment() -> None:
+    """Load .env files for local development before reading config values."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(current_dir)
+
+    # Prefer backend-local .env if present, then repo-level .env.
+    load_dotenv(os.path.join(current_dir, '.env'), override=False)
+    load_dotenv(os.path.join(repo_root, '.env'), override=False)
+
+
+_load_environment()
+
+
+def _host_is_resolvable(hostname: str) -> bool:
+    try:
+        socket.getaddrinfo(hostname, None)
+        return True
+    except socket.gaierror:
+        return False
+
+
+def _resolve_local_service_url(url: str) -> str:
+    """Fallback Docker service hostnames to localhost when running outside Docker."""
+    if not url:
+        return url
+
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        return url
+
+    docker_hosts = {"virtuoso", "lodview"}
+    if host not in docker_hosts or _host_is_resolvable(host):
+        return url
+
+    netloc = "localhost"
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+
+    return urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
 
 @dataclass
 class Config:
     """Application configuration class that reads from environment variables"""
     
     # Service URLs. Defaults target local host so backend can run outside Docker.
-    virtuoso_url: str = os.getenv('VIRTUOSO_URL', 'http://localhost:8890')
-    lodview_url: str = os.getenv('LODVIEW_URL', 'http://localhost:8080')
+    virtuoso_url: str = _resolve_local_service_url(
+        os.getenv('VIRTUOSO_URL', 'http://localhost:8890')
+    )
+    lodview_url: str = _resolve_local_service_url(
+        os.getenv('LODVIEW_URL', 'http://localhost:8080')
+    )
     
     # External URLs (browser-accessible)
     external_virtuoso_url: str = os.getenv('EXTERNAL_VIRTUOSO_URL', 'http://localhost:8890')

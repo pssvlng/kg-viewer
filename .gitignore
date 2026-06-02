@@ -113,6 +113,8 @@ jspm_packages/
 # dotenv environment variables file
 .env
 .env.test
+.env.*
+!.env.example
 
 # Application environment files with real secrets — use .example templates instead
 config/.env.development
