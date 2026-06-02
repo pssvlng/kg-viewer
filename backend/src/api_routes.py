@@ -347,49 +347,218 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
             search = request.args.get("search", "").strip()
 
             VIRTUOSO_LIMIT = 10_000
+            CANDIDATE_LITERAL_LIMIT = 5_000
+            message: Optional[str] = None
+            total_count: Optional[int] = None
+            use_uri_fragment_short_search = False
+            use_capped_literal_search = False
+            use_short_label_uri_search = False
+            skip_exact_count = False
+            sampled_total_count: Optional[int] = None
 
-            # Count query (apply filter if searching)
+            # Query strategy for searches on very large classes:
+            # 1) Start with fast URI/label search for all terms.
+            # 2) Then try rich class-scoped search.
+            # 3) If needed, degrade to URI/label search and finally URI-fragment search.
+            use_fast_fallback_search = False
             if search:
-                count_query = SPARQLQueries.get_query(
-                    "COUNT_CLASS_INSTANCES_WITH_FILTER",
-                    graph_uri=graph_uri, class_uri=class_uri, filter_text=search,
-                )
-            else:
-                count_query = SPARQLQueries.get_query(
-                    "COUNT_CLASS_INSTANCES_SIMPLE",
-                    graph_uri=graph_uri, class_uri=class_uri,
-                )
-            count_result = sparql_repo.query(count_query)
-            total_count = int(count_result[0]["count"]["value"]) if count_result else 0
-
-            if offset >= VIRTUOSO_LIMIT:
-                return jsonify({
-                    "success": True, "data": [],
-                    "message": "Only first 10000 records are displayed",
-                    "totalElements": total_count,
-                    "totalPages": (total_count + size - 1) // size,
-                    "size": size, "number": page,
-                })
+                use_short_label_uri_search = True
 
             if search:
-                instances_query = SPARQLQueries.get_query(
-                    "GET_CLASS_INSTANCES_WITH_FILTER",
-                    graph_uri=graph_uri, class_uri=class_uri,
-                    filter_text=search, limit=size, offset=offset,
-                )
+                if use_short_label_uri_search:
+                    instances_query = SPARQLQueries.get_query(
+                        "GET_CLASS_INSTANCES_LABEL_URI_FILTER",
+                        graph_uri=graph_uri,
+                        class_uri=class_uri,
+                        filter_text=search,
+                        limit=size,
+                        offset=offset,
+                    )
+                    instances_result = sparql_repo.query(instances_query, timeout_seconds=20)
+                    if instances_result is None:
+                        use_short_label_uri_search = False
+                        use_capped_literal_search = True
+                        message = "Search was narrowed to capped literal matching for performance on large classes."
+                        instances_query = SPARQLQueries.get_query(
+                            "GET_CLASS_INSTANCES_BY_LITERAL_SEARCH_CAPPED",
+                            graph_uri=graph_uri,
+                            class_uri=class_uri,
+                            search_term=search,
+                            candidate_limit=CANDIDATE_LITERAL_LIMIT,
+                            limit=size,
+                            offset=offset,
+                        )
+                        instances_result = sparql_repo.query(instances_query, timeout_seconds=20)
+                        if instances_result is None:
+                            use_capped_literal_search = False
+                            use_fast_fallback_search = True
+                            message = "Search was narrowed to URI/label matching for performance on large classes."
+                            instances_query = SPARQLQueries.get_query(
+                                "GET_CLASS_INSTANCES_WITH_FILTER_FAST",
+                                graph_uri=graph_uri, class_uri=class_uri,
+                                filter_text=search, limit=size, offset=offset,
+                            )
+                            instances_result = sparql_repo.query(instances_query, timeout_seconds=30)
+                            if instances_result is None:
+                                use_uri_fragment_short_search = True
+                                message = "Search was narrowed to URI-fragment matching for performance on large classes."
+                                instances_query = SPARQLQueries.get_query(
+                                    "GET_CLASS_INSTANCES_URI_FRAGMENT_FILTER",
+                                    graph_uri=graph_uri, class_uri=class_uri,
+                                    filter_text=search, limit=size, offset=offset,
+                                )
+                                instances_result = sparql_repo.query(instances_query, timeout_seconds=20)
+                elif use_capped_literal_search:
+                    instances_query = SPARQLQueries.get_query(
+                        "GET_CLASS_INSTANCES_BY_LITERAL_SEARCH_CAPPED",
+                        graph_uri=graph_uri,
+                        class_uri=class_uri,
+                        search_term=search,
+                        candidate_limit=CANDIDATE_LITERAL_LIMIT,
+                        limit=size,
+                        offset=offset,
+                    )
+                    instances_result = sparql_repo.query(instances_query, timeout_seconds=20)
+                    if instances_result is None:
+                        use_capped_literal_search = False
+                        use_fast_fallback_search = True
+                        message = "Search was narrowed to URI/label matching for performance on large classes."
+                        instances_query = SPARQLQueries.get_query(
+                            "GET_CLASS_INSTANCES_WITH_FILTER_FAST",
+                            graph_uri=graph_uri, class_uri=class_uri,
+                            filter_text=search, limit=size, offset=offset,
+                        )
+                        instances_result = sparql_repo.query(instances_query, timeout_seconds=30)
+                        if instances_result is None:
+                            use_uri_fragment_short_search = True
+                            message = "Search was narrowed to URI-fragment matching for performance on large classes."
+                            instances_query = SPARQLQueries.get_query(
+                                "GET_CLASS_INSTANCES_URI_FRAGMENT_FILTER",
+                                graph_uri=graph_uri, class_uri=class_uri,
+                                filter_text=search, limit=size, offset=offset,
+                            )
+                            instances_result = sparql_repo.query(instances_query, timeout_seconds=20)
+                elif use_uri_fragment_short_search:
+                    instances_query = SPARQLQueries.get_query(
+                        "GET_CLASS_INSTANCES_URI_FRAGMENT_FILTER",
+                        graph_uri=graph_uri, class_uri=class_uri,
+                        filter_text=search, limit=size, offset=offset,
+                    )
+                    instances_result = sparql_repo.query(instances_query, timeout_seconds=20)
+                elif use_fast_fallback_search:
+                    instances_query = SPARQLQueries.get_query(
+                        "GET_CLASS_INSTANCES_WITH_FILTER_FAST",
+                        graph_uri=graph_uri, class_uri=class_uri,
+                        filter_text=search, limit=size, offset=offset,
+                    )
+                    instances_result = sparql_repo.query(instances_query, timeout_seconds=45)
+                    if instances_result is None:
+                        use_uri_fragment_short_search = True
+                        message = "Search was narrowed to URI-fragment matching for performance on large classes."
+                        instances_query = SPARQLQueries.get_query(
+                            "GET_CLASS_INSTANCES_URI_FRAGMENT_FILTER",
+                            graph_uri=graph_uri, class_uri=class_uri,
+                            filter_text=search, limit=size, offset=offset,
+                        )
+                        instances_result = sparql_repo.query(instances_query, timeout_seconds=20)
+                else:
+                    instances_query = SPARQLQueries.get_query(
+                        "SEARCH_ENTITY_TYPE_RESULTS",
+                        graph_uri=graph_uri, class_uri=class_uri,
+                        search_term=search, limit=size, offset=offset,
+                    )
+                    instances_result = sparql_repo.query(instances_query, timeout_seconds=45)
+
+                    if instances_result is None:
+                        use_fast_fallback_search = True
+                        message = "Search was narrowed to URI/label matching for performance on large classes."
+                        instances_query = SPARQLQueries.get_query(
+                            "GET_CLASS_INSTANCES_WITH_FILTER_FAST",
+                            graph_uri=graph_uri, class_uri=class_uri,
+                            filter_text=search, limit=size, offset=offset,
+                        )
+                        instances_result = sparql_repo.query(instances_query, timeout_seconds=45)
+                        if instances_result is None:
+                            use_uri_fragment_short_search = True
+                            message = "Search was narrowed to URI-fragment matching for performance on large classes."
+                            instances_query = SPARQLQueries.get_query(
+                                "GET_CLASS_INSTANCES_URI_FRAGMENT_FILTER",
+                                graph_uri=graph_uri, class_uri=class_uri,
+                                filter_text=search, limit=size, offset=offset,
+                            )
+                            instances_result = sparql_repo.query(instances_query, timeout_seconds=20)
             else:
                 instances_query = SPARQLQueries.get_query(
                     "GET_CLASS_INSTANCES_PAGINATED",
                     graph_uri=graph_uri, class_uri=class_uri,
                     limit=size, offset=offset,
                 )
+                instances_result = sparql_repo.query(instances_query)
 
-            instances_result = sparql_repo.query(instances_query)
+            if instances_result is None:
+                if not search:
+                    return jsonify({
+                        "success": False,
+                        "error": "Entity search timed out. Please narrow your filter term.",
+                    }), 504
+
+                # Guaranteed fallback: sample class instances in pages and filter in Python.
+                # This avoids expensive CONTAINS scans in Virtuoso while still returning usable matches.
+                sample_chunk = 500
+                max_scan = 5_000
+                needed_matches = (page + 1) * size
+                scanned = 0
+                lower_search = search.lower()
+                sampled_matches: list[dict] = []
+
+                while scanned < max_scan and len(sampled_matches) < needed_matches:
+                    sample_query = SPARQLQueries.get_query(
+                        "GET_CLASS_INSTANCES_WITH_LABELS_PAGINATED",
+                        graph_uri=graph_uri,
+                        class_uri=class_uri,
+                        limit=sample_chunk,
+                        offset=scanned,
+                    )
+                    sample_results = sparql_repo.query(sample_query, timeout_seconds=20)
+                    if sample_results is None:
+                        break
+                    if not sample_results:
+                        break
+
+                    for r in sample_results:
+                        instance_uri = r["instance"]["value"]
+                        label_val = ""
+                        if "label" in r and r["label"]:
+                            label_val = r["label"].get("value", "")
+                        haystack = f"{instance_uri} {label_val}".lower()
+                        if lower_search in haystack:
+                            sampled_matches.append({"instance": {"value": instance_uri}, "label": {"value": label_val}})
+
+                    if len(sample_results) < sample_chunk:
+                        scanned += len(sample_results)
+                        break
+                    scanned += sample_chunk
+
+                page_start = offset
+                page_end = page_start + size
+                instances_result = sampled_matches[page_start:page_end]
+                skip_exact_count = True
+                sampled_total_count = len(sampled_matches)
+                if len(sampled_matches) >= needed_matches and scanned >= max_scan:
+                    sampled_total_count += 1
+                fallback_note = (
+                    f"Search used sampled URI/label fallback over first {scanned} instances for responsiveness."
+                )
+                if message:
+                    message = f"{message} {fallback_note}"
+                else:
+                    message = fallback_note
+
             data_rows: list[dict] = []
 
             for result in (instances_result or []):
                 instance_uri = result["instance"]["value"]
-                if search and "label" in result and result["label"]:
+                if search and "label" in result and result["label"] and result["label"].get("value"):
                     label = result["label"]["value"]
                 else:
                     label = _uri_fragment(instance_uri)
@@ -407,9 +576,132 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
                                 label = candidate.strip()
                 data_rows.append({"label": label, "uri": instance_uri})
 
-            message: Optional[str] = None
+            # Best-effort count: do not fail the request if exact counting times out.
+            count_timed_out = False
+            if search:
+                if skip_exact_count:
+                    count_result = None
+                    count_timed_out = True
+                    total_count = sampled_total_count if sampled_total_count is not None else (offset + len(data_rows))
+                elif use_uri_fragment_short_search:
+                    count_query = SPARQLQueries.get_query(
+                        "COUNT_CLASS_INSTANCES_URI_FRAGMENT_FILTER",
+                        graph_uri=graph_uri, class_uri=class_uri, filter_text=search,
+                    )
+                    count_result = sparql_repo.query(count_query, timeout_seconds=20)
+                elif use_short_label_uri_search:
+                    count_query = SPARQLQueries.get_query(
+                        "COUNT_CLASS_INSTANCES_LABEL_URI_FILTER",
+                        graph_uri=graph_uri,
+                        class_uri=class_uri,
+                        filter_text=search,
+                    )
+                    count_result = sparql_repo.query(count_query, timeout_seconds=20)
+                    if count_result is None:
+                        use_short_label_uri_search = False
+                        use_capped_literal_search = True
+                        count_query = SPARQLQueries.get_query(
+                            "COUNT_CLASS_INSTANCES_BY_LITERAL_SEARCH_CAPPED",
+                            graph_uri=graph_uri,
+                            class_uri=class_uri,
+                            search_term=search,
+                            candidate_limit=CANDIDATE_LITERAL_LIMIT,
+                        )
+                        count_result = sparql_repo.query(count_query, timeout_seconds=20)
+                elif use_capped_literal_search:
+                    count_query = SPARQLQueries.get_query(
+                        "COUNT_CLASS_INSTANCES_BY_LITERAL_SEARCH_CAPPED",
+                        graph_uri=graph_uri,
+                        class_uri=class_uri,
+                        search_term=search,
+                        candidate_limit=CANDIDATE_LITERAL_LIMIT,
+                    )
+                    count_result = sparql_repo.query(count_query, timeout_seconds=20)
+                    if count_result is None:
+                        use_fast_fallback_search = True
+                        count_query = SPARQLQueries.get_query(
+                            "COUNT_CLASS_INSTANCES_WITH_FILTER_FAST",
+                            graph_uri=graph_uri, class_uri=class_uri, filter_text=search,
+                        )
+                        count_result = sparql_repo.query(count_query, timeout_seconds=20)
+                        if count_result is None:
+                            use_uri_fragment_short_search = True
+                            count_query = SPARQLQueries.get_query(
+                                "COUNT_CLASS_INSTANCES_URI_FRAGMENT_FILTER",
+                                graph_uri=graph_uri, class_uri=class_uri, filter_text=search,
+                            )
+                            count_result = sparql_repo.query(count_query, timeout_seconds=20)
+                elif use_fast_fallback_search:
+                    count_query = SPARQLQueries.get_query(
+                        "COUNT_CLASS_INSTANCES_WITH_FILTER_FAST",
+                        graph_uri=graph_uri, class_uri=class_uri, filter_text=search,
+                    )
+                    count_result = sparql_repo.query(count_query, timeout_seconds=30)
+                    if count_result is None:
+                        use_uri_fragment_short_search = True
+                        count_query = SPARQLQueries.get_query(
+                            "COUNT_CLASS_INSTANCES_URI_FRAGMENT_FILTER",
+                            graph_uri=graph_uri, class_uri=class_uri, filter_text=search,
+                        )
+                        count_result = sparql_repo.query(count_query, timeout_seconds=20)
+                else:
+                    count_query = SPARQLQueries.get_query(
+                        "COUNT_ENTITY_TYPE_SEARCH_RESULTS",
+                        graph_uri=graph_uri, class_uri=class_uri, search_term=search,
+                    )
+                    count_result = sparql_repo.query(count_query, timeout_seconds=30)
+                    if count_result is None:
+                        use_uri_fragment_short_search = True
+                        count_query = SPARQLQueries.get_query(
+                            "COUNT_CLASS_INSTANCES_URI_FRAGMENT_FILTER",
+                            graph_uri=graph_uri, class_uri=class_uri, filter_text=search,
+                        )
+                        count_result = sparql_repo.query(count_query, timeout_seconds=20)
+            else:
+                count_query = SPARQLQueries.get_query(
+                    "COUNT_CLASS_INSTANCES_SIMPLE",
+                    graph_uri=graph_uri, class_uri=class_uri,
+                )
+                count_result = sparql_repo.query(count_query)
+
+            if count_result is None:
+                count_timed_out = True
+                total_count = offset + len(data_rows)
+                if len(data_rows) == size:
+                    total_count += 1
+                if message:
+                    message = f"{message} Total count is estimated because exact counting timed out."
+                else:
+                    message = "Total count is estimated because exact counting timed out."
+            else:
+                total_count = int(count_result[0]["count"]["value"]) if count_result else 0
+
+            if not count_timed_out and offset >= VIRTUOSO_LIMIT:
+                limit_message = "Only first 10000 records are displayed"
+                if message:
+                    limit_message = f"{message} {limit_message}"
+                return jsonify({
+                    "success": True, "data": [],
+                    "message": limit_message,
+                    "totalElements": total_count,
+                    "totalPages": (total_count + size - 1) // size,
+                    "size": size, "number": page,
+                })
+
             if search and total_count > VIRTUOSO_LIMIT and offset < VIRTUOSO_LIMIT:
-                message = "Only first 10000 records are displayed"
+                if message:
+                    message = f"{message} Only first 10000 records are displayed"
+                else:
+                    message = "Only first 10000 records are displayed"
+
+            if search and use_capped_literal_search:
+                capped_info = (
+                    f"Search considers up to {CANDIDATE_LITERAL_LIMIT} literal matches before class filtering."
+                )
+                if message:
+                    message = f"{message} {capped_info}"
+                else:
+                    message = capped_info
 
             response_data: dict = {
                 "success": True, "data": data_rows,

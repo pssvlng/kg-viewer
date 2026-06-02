@@ -83,12 +83,13 @@ export class ServerSideDataSource extends DataSource<any> {
     filter: string = '',
     graphUri?: string
   ) {
+    this.cancelCurrentRequest();
     this.loadingSubject.next(true);
 
     let params = new HttpParams()
       .set('page', (page - 1).toString()) // Convert to 0-based page number for API
       .set('size', pageSize.toString())
-      .set('search', filter);
+      .set('search', (filter || '').trim());
 
     if (graphUri) {
       params = params.set('graphUri', graphUri);
@@ -96,7 +97,7 @@ export class ServerSideDataSource extends DataSource<any> {
 
     const url = `${environment.apiUrl}/api/graphs/${encodeURIComponent(graphName)}/entities/${encodeURIComponent(classUri)}/instances`;
 
-    this.http.get<any>(url, { params }).subscribe({
+    this.currentRequest = this.http.get<any>(url, { params }).subscribe({
       next: (response) => {
         console.log('ServerSideDataSource - Page:', page, 'Success:', response.success, 'Message:', response.message, 'Data length:', response.data?.length);
         if (response.success) {
@@ -120,12 +121,14 @@ export class ServerSideDataSource extends DataSource<any> {
           console.error('Server returned error:', response.error);
         }
         this.loadingSubject.next(false);
+        this.currentRequest = null;
       },
       error: (error) => {
         this.dataSubject.next([]);
         this.messageSubject.next(null);
         this.loadingSubject.next(false);
         console.error('Error loading data:', error);
+        this.currentRequest = null;
       }
     });
   }
@@ -174,6 +177,7 @@ export class ServerSideDataSource extends DataSource<any> {
       }
     });
   }
+
 }
 
 @Injectable({

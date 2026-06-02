@@ -67,6 +67,26 @@ class SPARQLQueries:
     LIMIT {limit}
     OFFSET {offset}
     """
+
+    GET_CLASS_INSTANCES_WITH_LABELS_PAGINATED = """
+    SELECT ?instance (SAMPLE(?label) as ?label) WHERE {{
+        GRAPH <{graph_uri}> {{
+            ?instance a <{class_uri}> .
+            OPTIONAL {{
+                ?instance ?labelPred ?label .
+                FILTER(?labelPred IN (
+                    <http://www.w3.org/2000/01/rdf-schema#label>,
+                    <http://xmlns.com/foaf/0.1/name>,
+                    <http://schema.org/name>
+                ))
+            }}
+        }}
+    }}
+    GROUP BY ?instance
+    ORDER BY ?instance
+    LIMIT {limit}
+    OFFSET {offset}
+    """
     
     GET_ALL_CLASS_INSTANCES = """
     SELECT DISTINCT ?instance WHERE {{
@@ -230,6 +250,236 @@ class SPARQLQueries:
             )
         }}
     }}
+    LIMIT {limit}
+    OFFSET {offset}
+    """
+
+    # Performance-focused URI/label search for very large classes.
+    # Uses EXISTS in FILTER to avoid OPTIONAL join explosion.
+    COUNT_CLASS_INSTANCES_WITH_FILTER_FAST = """
+    SELECT (COUNT(DISTINCT ?instance) as ?count) WHERE {{
+        GRAPH <{graph_uri}> {{
+            ?instance a <{class_uri}> .
+            FILTER(
+                CONTAINS(LCASE(STR(?instance)), LCASE("{filter_text}")) ||
+                EXISTS {{
+                    ?instance ?labelPred ?label .
+                    FILTER(?labelPred IN (
+                        <http://www.w3.org/2000/01/rdf-schema#label>,
+                        <http://xmlns.com/foaf/0.1/name>,
+                        <http://schema.org/name>
+                    ))
+                    FILTER(CONTAINS(LCASE(STR(?label)), LCASE("{filter_text}")))
+                }}
+            )
+        }}
+    }}
+    """
+
+    GET_CLASS_INSTANCES_WITH_FILTER_FAST = """
+    SELECT ?instance (SAMPLE(?labelAny) as ?label) WHERE {{
+        GRAPH <{graph_uri}> {{
+            ?instance a <{class_uri}> .
+            OPTIONAL {{
+                ?instance ?labelPredAny ?labelAny .
+                FILTER(?labelPredAny IN (
+                    <http://www.w3.org/2000/01/rdf-schema#label>,
+                    <http://xmlns.com/foaf/0.1/name>,
+                    <http://schema.org/name>
+                ))
+            }}
+            FILTER(
+                CONTAINS(LCASE(STR(?instance)), LCASE("{filter_text}")) ||
+                EXISTS {{
+                    ?instance ?labelPred ?label .
+                    FILTER(?labelPred IN (
+                        <http://www.w3.org/2000/01/rdf-schema#label>,
+                        <http://xmlns.com/foaf/0.1/name>,
+                        <http://schema.org/name>
+                    ))
+                    FILTER(CONTAINS(LCASE(STR(?label)), LCASE("{filter_text}")))
+                }}
+            )
+        }}
+    }}
+    GROUP BY ?instance
+    ORDER BY ?instance
+    LIMIT {limit}
+    OFFSET {offset}
+    """
+
+    # Ultra-fast short-term search using only URI fragment match.
+    # Avoids joins on label/literal triples to keep latency bounded on huge classes.
+    COUNT_CLASS_INSTANCES_URI_FRAGMENT_FILTER = """
+    SELECT (COUNT(DISTINCT ?instance) as ?count) WHERE {{
+        GRAPH <{graph_uri}> {{
+            ?instance a <{class_uri}> .
+            FILTER(CONTAINS(LCASE(STRAFTER(STR(?instance), "#")), LCASE("{filter_text}")) ||
+                   CONTAINS(LCASE(STRAFTER(STR(?instance), "/")), LCASE("{filter_text}")) ||
+                   CONTAINS(LCASE(STR(?instance)), LCASE("{filter_text}")))
+        }}
+    }}
+    """
+
+    GET_CLASS_INSTANCES_URI_FRAGMENT_FILTER = """
+    SELECT DISTINCT ?instance WHERE {{
+        GRAPH <{graph_uri}> {{
+            ?instance a <{class_uri}> .
+            FILTER(CONTAINS(LCASE(STRAFTER(STR(?instance), "#")), LCASE("{filter_text}")) ||
+                   CONTAINS(LCASE(STRAFTER(STR(?instance), "/")), LCASE("{filter_text}")) ||
+                   CONTAINS(LCASE(STR(?instance)), LCASE("{filter_text}")))
+        }}
+    }}
+    ORDER BY ?instance
+    LIMIT {limit}
+    OFFSET {offset}
+    """
+
+    # Fast short-term search over URI and label predicates only.
+    # Avoids broad literal scans while still returning intuitive matches.
+    COUNT_CLASS_INSTANCES_LABEL_URI_FILTER = """
+    SELECT (COUNT(DISTINCT ?instance) as ?count) WHERE {{
+        GRAPH <{graph_uri}> {{
+            {{
+                ?instance a <{class_uri}> .
+                FILTER(CONTAINS(LCASE(STR(?instance)), LCASE("{filter_text}")))
+            }}
+            UNION
+            {{
+                ?instance a <{class_uri}> ; ?labelPred ?label .
+                FILTER(?labelPred IN (
+                    <http://www.w3.org/2000/01/rdf-schema#label>,
+                    <http://xmlns.com/foaf/0.1/name>,
+                    <http://schema.org/name>
+                ))
+                FILTER(CONTAINS(LCASE(STR(?label)), LCASE("{filter_text}")))
+            }}
+        }}
+    }}
+    """
+
+    GET_CLASS_INSTANCES_LABEL_URI_FILTER = """
+    SELECT DISTINCT ?instance ?label WHERE {{
+        GRAPH <{graph_uri}> {{
+            {{
+                ?instance a <{class_uri}> ; ?labelPred ?label .
+                FILTER(?labelPred IN (
+                    <http://www.w3.org/2000/01/rdf-schema#label>,
+                    <http://xmlns.com/foaf/0.1/name>,
+                    <http://schema.org/name>
+                ))
+                FILTER(CONTAINS(LCASE(STR(?label)), LCASE("{filter_text}")))
+            }}
+            UNION
+            {{
+                ?instance a <{class_uri}> .
+                FILTER(CONTAINS(LCASE(STR(?instance)), LCASE("{filter_text}")))
+                BIND("" AS ?label)
+            }}
+        }}
+    }}
+    ORDER BY ?instance
+    LIMIT {limit}
+    OFFSET {offset}
+    """
+
+    # Capped literal search scoped to class instances.
+    # Mirrors Search-tab matching style but restricts by class using a bounded candidate set.
+    COUNT_CLASS_INSTANCES_BY_LITERAL_SEARCH_CAPPED = """
+    SELECT (COUNT(DISTINCT ?instance) as ?count) WHERE {{
+        GRAPH <{graph_uri}> {{
+            {{
+                SELECT DISTINCT ?instance WHERE {{
+                    ?instance ?predicate ?object .
+                    FILTER(isLiteral(?object))
+                    FILTER(CONTAINS(LCASE(STR(?object)), LCASE("{search_term}")))
+                }}
+                LIMIT {candidate_limit}
+            }}
+            ?instance a <{class_uri}> .
+        }}
+    }}
+    """
+
+    GET_CLASS_INSTANCES_BY_LITERAL_SEARCH_CAPPED = """
+    SELECT ?instance (SAMPLE(?labelAny) as ?label) WHERE {{
+        GRAPH <{graph_uri}> {{
+            {{
+                SELECT DISTINCT ?instance WHERE {{
+                    ?instance ?predicate ?object .
+                    FILTER(isLiteral(?object))
+                    FILTER(CONTAINS(LCASE(STR(?object)), LCASE("{search_term}")))
+                }}
+                LIMIT {candidate_limit}
+            }}
+            ?instance a <{class_uri}> .
+            OPTIONAL {{
+                ?instance ?labelPredAny ?labelAny .
+                FILTER(?labelPredAny IN (
+                    <http://www.w3.org/2000/01/rdf-schema#label>,
+                    <http://xmlns.com/foaf/0.1/name>,
+                    <http://schema.org/name>
+                ))
+            }}
+        }}
+    }}
+    GROUP BY ?instance
+    ORDER BY ?instance
+    LIMIT {limit}
+    OFFSET {offset}
+    """
+
+    # Dedicated entity-type tab search (searches full instance context, not only label/URI)
+    COUNT_ENTITY_TYPE_SEARCH_RESULTS = """
+    SELECT (COUNT(DISTINCT ?instance) as ?count) WHERE {{
+        GRAPH <{graph_uri}> {{
+            ?instance a <{class_uri}> .
+            OPTIONAL {{
+                ?instance ?labelPred ?label .
+                FILTER(?labelPred IN (
+                    <http://www.w3.org/2000/01/rdf-schema#label>,
+                    <http://xmlns.com/foaf/0.1/name>,
+                    <http://schema.org/name>
+                ))
+            }}
+            OPTIONAL {{
+                ?instance ?searchPred ?searchValue .
+                FILTER(isLiteral(?searchValue))
+            }}
+            FILTER(
+                CONTAINS(LCASE(STR(?instance)), LCASE("{search_term}")) ||
+                CONTAINS(LCASE(STR(COALESCE(?label, ""))), LCASE("{search_term}")) ||
+                CONTAINS(LCASE(STR(COALESCE(?searchValue, ""))), LCASE("{search_term}"))
+            )
+        }}
+    }}
+    """
+
+    SEARCH_ENTITY_TYPE_RESULTS = """
+    SELECT ?instance (SAMPLE(?label) as ?label) WHERE {{
+        GRAPH <{graph_uri}> {{
+            ?instance a <{class_uri}> .
+            OPTIONAL {{
+                ?instance ?labelPred ?label .
+                FILTER(?labelPred IN (
+                    <http://www.w3.org/2000/01/rdf-schema#label>,
+                    <http://xmlns.com/foaf/0.1/name>,
+                    <http://schema.org/name>
+                ))
+            }}
+            OPTIONAL {{
+                ?instance ?searchPred ?searchValue .
+                FILTER(isLiteral(?searchValue))
+            }}
+            FILTER(
+                CONTAINS(LCASE(STR(?instance)), LCASE("{search_term}")) ||
+                CONTAINS(LCASE(STR(COALESCE(?label, ""))), LCASE("{search_term}")) ||
+                CONTAINS(LCASE(STR(COALESCE(?searchValue, ""))), LCASE("{search_term}"))
+            )
+        }}
+    }}
+    GROUP BY ?instance
+    ORDER BY ?instance
     LIMIT {limit}
     OFFSET {offset}
     """

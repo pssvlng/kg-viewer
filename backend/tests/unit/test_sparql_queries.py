@@ -44,11 +44,35 @@ class TestGetQuery:
         )
         assert "hello" in q
 
+    def test_entity_type_search_queries_include_class_and_term(self):
+        count_q = SPARQLQueries.get_query(
+            "COUNT_ENTITY_TYPE_SEARCH_RESULTS",
+            graph_uri="http://ex.org/g",
+            class_uri="http://ex.org/C",
+            search_term="Berlin",
+        )
+        data_q = SPARQLQueries.get_query(
+            "SEARCH_ENTITY_TYPE_RESULTS",
+            graph_uri="http://ex.org/g",
+            class_uri="http://ex.org/C",
+            search_term="Berlin",
+            limit=25,
+            offset=0,
+        )
+
+        assert "http://ex.org/C" in count_q
+        assert "Berlin" in count_q
+        assert "http://ex.org/C" in data_q
+        assert "Berlin" in data_q
+        assert "LIMIT 25" in data_q
+
     def test_all_graph_style_queries_contain_graph_keyword(self):
         graph_scoped = [
             ("COUNT_GRAPH_TRIPLES", {"graph_uri": "http://ex.org/g"}),
             ("GET_GRAPH_CLASSES_WITH_COUNTS", {"graph_uri": "http://ex.org/g"}),
             ("GET_CLASS_INSTANCES_PAGINATED", {"graph_uri": "http://ex.org/g", "class_uri": "http://ex.org/C", "limit": 10, "offset": 0}),
+            ("COUNT_ENTITY_TYPE_SEARCH_RESULTS", {"graph_uri": "http://ex.org/g", "class_uri": "http://ex.org/C", "search_term": "x"}),
+            ("SEARCH_ENTITY_TYPE_RESULTS", {"graph_uri": "http://ex.org/g", "class_uri": "http://ex.org/C", "search_term": "x", "limit": 10, "offset": 0}),
             ("GET_ENTITY_OUTWARD_CONNECTIONS", {"graph_uri": "http://ex.org/g", "entity_uri": "http://ex.org/e", "max_nodes": 10}),
             ("GET_ENTITY_LITERALS", {"graph_uri": "http://ex.org/g", "entity_uri": "http://ex.org/e"}),
             ("SEARCH_LITERALS", {"graph_uri": "http://ex.org/g", "search_term": "x", "limit": 10}),

@@ -137,8 +137,32 @@ export interface TabInfo {
                 <!-- Entity Types Overview -->
                 <div *ngIf="tab.uploadInfo?.analysisResults?.classList" class="classes-overview">
                   <h5>Entity Types Overview</h5>
+                  <div class="entity-types-filter-section">
+                    <mat-form-field appearance="outline" class="entity-types-filter-field">
+                      <mat-label>Filter Entity Types</mat-label>
+                      <input
+                        matInput
+                        #entityTypesFilterInput
+                        placeholder="Search by entity type"
+                        [(ngModel)]="entityTypesFilterInputText"
+                        (keyup.enter)="triggerEntityTypesSearch()">
+                      <button
+                        mat-icon-button
+                        matSuffix
+                        (click)="triggerEntityTypesSearch()"
+                        matTooltip="Search">
+                        <mat-icon>search</mat-icon>
+                      </button>
+                      <mat-icon
+                        matSuffix
+                        *ngIf="entityTypesFilterInputText"
+                        class="clear-icon"
+                        (click)="clearEntityTypesFilter(entityTypesFilterInput)"
+                        matTooltip="Clear Filter">close</mat-icon>
+                    </mat-form-field>
+                  </div>
                   <div class="table-container">
-                    <table mat-table [dataSource]="getEntityTypesDataSource(tab.uploadInfo?.analysisResults?.classList || [])" 
+                    <table mat-table [dataSource]="getFilteredEntityTypes(tab.uploadInfo?.analysisResults?.classList || [])" 
                            class="classes-table">
                       
                       <!-- Entity Name Column -->
@@ -432,15 +456,21 @@ export interface TabInfo {
               </mat-paginator>
               
               <!-- Server-side paginator -->
-              <mat-paginator 
-                *ngIf="isServerSideDataSource(tab) && getServerDataSource(tab)"
-                [length]="(getServerDataSource(tab)!.pagination$ | async)?.totalItems || 0"
-                [pageSize]="(getServerDataSource(tab)!.pagination$ | async)?.pageSize || 25"
-                [pageIndex]="((getServerDataSource(tab)!.pagination$ | async)?.page || 1) - 1"
-                [pageSizeOptions]="[25, 50, 100, 250]"
-                (page)="onPageChange($event, tab)"
-                showFirstLastButtons>
-              </mat-paginator>
+              <div class="paginator-with-spinner" *ngIf="isServerSideDataSource(tab) && getServerDataSource(tab)">
+                <mat-paginator 
+                  [length]="(getServerDataSource(tab)!.pagination$ | async)?.totalItems || 0"
+                  [pageSize]="(getServerDataSource(tab)!.pagination$ | async)?.pageSize || 25"
+                  [pageIndex]="((getServerDataSource(tab)!.pagination$ | async)?.page || 1) - 1"
+                  [pageSizeOptions]="[25, 50, 100, 250]"
+                  (page)="onPageChange($event, tab)"
+                  showFirstLastButtons>
+                </mat-paginator>
+                <mat-spinner 
+                  *ngIf="(isServerSideDataSource(tab) && (getServerDataSource(tab)?.loading$ | async)) || isFilterLoading(tab)"
+                  diameter="20"
+                  class="paginator-spinner">
+                </mat-spinner>
+              </div>
             </div>
             
             <!-- Text View -->
@@ -508,6 +538,15 @@ export interface TabInfo {
       margin-top: 30px;
       padding-top: 20px;
       border-top: 1px solid #e0e0e0;
+    }
+
+    .entity-types-filter-section {
+      margin: 12px 0;
+    }
+
+    .entity-types-filter-field {
+      width: 320px;
+      max-width: 100%;
     }
     
     .classes-overview h4, .classes-overview h5 {
@@ -734,6 +773,21 @@ export interface TabInfo {
       padding: 12px;
       margin-bottom: 16px;
     }
+
+    .paginator-with-spinner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .paginator-with-spinner mat-paginator {
+      flex: 1;
+    }
+
+    .paginator-spinner {
+      flex-shrink: 0;
+      margin-right: 8px;
+    }
   `]
 })
 export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy, ContentNavigable {
@@ -761,6 +815,8 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   filterControls = new Map<string, FormControl>();
   filterStates = new Map<string, { isLoading: boolean; lastFilterTerm?: string }>();
   currentFilters = new Map<string, string>();
+  entityTypesFilterInputText = '';
+  entityTypesFilterAppliedText = '';
   configuredSparqlEndpoint = 'http://localhost:8890/sparql'; // fallback
   availableGraphs: string[] = []; // Store available graph names
   
@@ -921,11 +977,33 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     }
   }
 
-  getEntityTypesDataSource(classList: any[] | undefined): MatTableDataSource<any> {
-    const sorted = (classList || []).slice().sort((a, b) =>
+  getFilteredEntityTypes(classList: any[] | undefined): any[] {
+    const activeFilter = (this.entityTypesFilterAppliedText || '').trim().toLowerCase();
+    const filtered = (classList || []).filter(item => {
+      if (!activeFilter) {
+        return true;
+      }
+      const label = (item?.label || '').toString().toLowerCase();
+      const uri = (item?.uri || '').toString().toLowerCase();
+      return label.includes(activeFilter) || uri.includes(activeFilter);
+    });
+    return filtered.slice().sort((a, b) =>
       (a.label || '').localeCompare(b.label || '')
     );
-    return new MatTableDataSource(sorted);
+  }
+
+  triggerEntityTypesSearch() {
+    this.entityTypesFilterAppliedText = (this.entityTypesFilterInputText || '').trim();
+    this.cd.markForCheck();
+  }
+
+  clearEntityTypesFilter(filterInput?: HTMLInputElement) {
+    this.entityTypesFilterInputText = '';
+    this.entityTypesFilterAppliedText = '';
+    if (filterInput) {
+      filterInput.value = '';
+    }
+    this.cd.markForCheck();
   }
 
   trackByFn(index: number, item: TabInfo): string {
