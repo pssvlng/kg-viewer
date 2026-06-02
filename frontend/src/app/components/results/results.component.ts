@@ -138,7 +138,7 @@ export interface TabInfo {
                 <div *ngIf="tab.uploadInfo?.analysisResults?.classList" class="classes-overview">
                   <h5 class="classes-overview-title">Entity Types Overview</h5>
                   <div class="table-container">
-                    <table mat-table [dataSource]="getSortedEntityTypes(tab.uploadInfo?.analysisResults?.classList || [])"
+                    <table mat-table [dataSource]="tab.uploadInfo?.analysisResults?.classList || []"
                            class="classes-table">
                       
                       <!-- Entity Name Column -->
@@ -889,9 +889,14 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   }
 
   updateTabs() {
-    // Ensure results is an array before processing
     const resultsArray = Array.isArray(this.results) ? this.results : [];
     this.tabs = this.sortTabs(resultsArray);
+    this.tabs.forEach(tab => {
+      const classList = tab.uploadInfo?.analysisResults?.classList;
+      if (tab.type === 'summary' && classList) {
+        classList.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+      }
+    });
     this.initializeDataSources();
   }
 
@@ -973,11 +978,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     setTimeout(() => this.connectPaginatorsAndSorts(), 0);
   }
 
-  getSortedEntityTypes(classList: any[]): any[] {
-    return [...classList].sort((a, b) => (a.label || '').localeCompare(b.label || ''));
-  }
-
-  shouldUseServerSidePagination(tab: TabInfo): boolean {
+shouldUseServerSidePagination(tab: TabInfo): boolean {
     // Use server-side pagination if:
     // 1. The tab has uploadInfo with classUri (indicating it's a class instance table)
     // 2. OR the data array has more than 100 items (arbitrary threshold)
