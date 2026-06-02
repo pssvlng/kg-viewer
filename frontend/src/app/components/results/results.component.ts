@@ -136,33 +136,9 @@ export interface TabInfo {
                 
                 <!-- Entity Types Overview -->
                 <div *ngIf="tab.uploadInfo?.analysisResults?.classList" class="classes-overview">
-                  <h5>Entity Types Overview</h5>
-                  <div class="entity-types-filter-section">
-                    <mat-form-field appearance="outline" class="entity-types-filter-field">
-                      <mat-label>Filter Entity Types</mat-label>
-                      <input
-                        matInput
-                        #entityTypesFilterInput
-                        placeholder="Search by entity type"
-                        [(ngModel)]="entityTypesFilterInputText"
-                        (keyup.enter)="triggerEntityTypesSearch()">
-                      <button
-                        mat-icon-button
-                        matSuffix
-                        (click)="triggerEntityTypesSearch()"
-                        matTooltip="Search">
-                        <mat-icon>search</mat-icon>
-                      </button>
-                      <mat-icon
-                        matSuffix
-                        *ngIf="entityTypesFilterInputText"
-                        class="clear-icon"
-                        (click)="clearEntityTypesFilter(entityTypesFilterInput)"
-                        matTooltip="Clear Filter">close</mat-icon>
-                    </mat-form-field>
-                  </div>
+                  <h5 class="classes-overview-title">Entity Types Overview</h5>
                   <div class="table-container">
-                    <table mat-table [dataSource]="getFilteredEntityTypes(tab.uploadInfo?.analysisResults?.classList || [])" 
+                    <table mat-table [dataSource]="getSortedEntityTypes(tab.uploadInfo?.analysisResults?.classList || [])"
                            class="classes-table">
                       
                       <!-- Entity Name Column -->
@@ -540,18 +516,16 @@ export interface TabInfo {
       border-top: 1px solid #e0e0e0;
     }
 
-    .entity-types-filter-section {
-      margin: 12px 0;
-    }
-
-    .entity-types-filter-field {
-      width: 320px;
-      max-width: 100%;
-    }
-    
-    .classes-overview h4, .classes-overview h5 {
+    .classes-overview h4 {
       margin-bottom: 10px;
       color: #1976d2;
+    }
+
+    .classes-overview-title {
+      margin-bottom: 10px;
+      color: #1976d2;
+      font-size: 1rem;
+      font-weight: 500;
     }
     
     .classes-table {
@@ -593,15 +567,6 @@ export interface TabInfo {
       margin-bottom: 20px;
     }
     
-    .clear-icon {
-      cursor: pointer;
-      color: #666;
-      font-size: 18px;
-    }
-    
-    .clear-icon:hover {
-      color: #333;
-    }
     
     .results-table {
       width: 100%;
@@ -815,8 +780,6 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
   filterControls = new Map<string, FormControl>();
   filterStates = new Map<string, { isLoading: boolean; lastFilterTerm?: string }>();
   currentFilters = new Map<string, string>();
-  entityTypesFilterInputText = '';
-  entityTypesFilterAppliedText = '';
   configuredSparqlEndpoint = 'http://localhost:8890/sparql'; // fallback
   availableGraphs: string[] = []; // Store available graph names
   
@@ -977,36 +940,7 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     }
   }
 
-  getFilteredEntityTypes(classList: any[] | undefined): any[] {
-    const activeFilter = (this.entityTypesFilterAppliedText || '').trim().toLowerCase();
-    const filtered = (classList || []).filter(item => {
-      if (!activeFilter) {
-        return true;
-      }
-      const label = (item?.label || '').toString().toLowerCase();
-      const uri = (item?.uri || '').toString().toLowerCase();
-      return label.includes(activeFilter) || uri.includes(activeFilter);
-    });
-    return filtered.slice().sort((a, b) =>
-      (a.label || '').localeCompare(b.label || '')
-    );
-  }
-
-  triggerEntityTypesSearch() {
-    this.entityTypesFilterAppliedText = (this.entityTypesFilterInputText || '').trim();
-    this.cd.markForCheck();
-  }
-
-  clearEntityTypesFilter(filterInput?: HTMLInputElement) {
-    this.entityTypesFilterInputText = '';
-    this.entityTypesFilterAppliedText = '';
-    if (filterInput) {
-      filterInput.value = '';
-    }
-    this.cd.markForCheck();
-  }
-
-  trackByFn(index: number, item: TabInfo): string {
+  trackByFn(_index: number, item: TabInfo): string {
     return item.label;
   }
 
@@ -1037,6 +971,10 @@ export class ResultsComponent implements OnInit, OnChanges, AfterViewInit, OnDes
     
     // Re-connect paginators and sorts if they're already available
     setTimeout(() => this.connectPaginatorsAndSorts(), 0);
+  }
+
+  getSortedEntityTypes(classList: any[]): any[] {
+    return [...classList].sort((a, b) => (a.label || '').localeCompare(b.label || ''));
   }
 
   shouldUseServerSidePagination(tab: TabInfo): boolean {
