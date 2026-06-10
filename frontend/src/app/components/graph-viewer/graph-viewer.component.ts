@@ -108,11 +108,16 @@ declare var cytoscape: any;
                      matTooltipPosition="above">
                   {{ literal.predicateLabel || getUriFragment(literal.predicate) }}
                 </div>
-                <div matListItemLine 
-                     class="literal-value" 
+                <div matListItemLine
+                     class="literal-value"
                      [matTooltip]="literal.value"
                      matTooltipPosition="above">
-                  {{ literal.value }}
+                  <a *ngIf="isUri(literal.value)"
+                     [href]="literal.value"
+                     target="_blank"
+                     rel="noopener noreferrer"
+                     class="literal-uri-link">{{ literal.value }}</a>
+                  <span *ngIf="!isUri(literal.value)">{{ literal.value }}</span>
                 </div>
               </mat-list-item>
             </mat-list>
@@ -337,6 +342,16 @@ declare var cytoscape: any;
       font-family: monospace;
       color: #666;
       word-break: break-all;
+    }
+
+    .literal-uri-link {
+      color: #1976d2;
+      text-decoration: none;
+      word-break: break-all;
+    }
+
+    .literal-uri-link:hover {
+      text-decoration: underline;
     }
     
     .cy-tooltip {
@@ -1479,6 +1494,10 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
       // Fallback for simple parent-child relationship
       this.backRequested.emit();
     }
+  }
+
+  isUri(value: string): boolean {
+    return /^https?:\/\/\S+/.test(value);
   }
 
   getUriFragment(uri: string): string {

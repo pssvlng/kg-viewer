@@ -170,10 +170,11 @@ export interface TabInfo {
               <div class="search-header">
                 <mat-form-field appearance="outline" class="search-input">
                   <mat-label>Search Knowledge Graph</mat-label>
-                  <input matInput 
+                  <input matInput
                          #searchInput
                          placeholder="Search object literals..."
-                         (keyup.enter)="triggerSearch(tab, searchInput.value)">
+                         (keyup.enter)="triggerSearch(tab, searchInput.value)"
+                         (input)="!searchInput.value && clearSearch(tab)">
                   <button mat-icon-button 
                           matSuffix 
                           (click)="triggerSearch(tab, searchInput.value)"
@@ -292,10 +293,11 @@ export interface TabInfo {
                 <div class="table-actions">
                   <mat-form-field appearance="outline">
                     <mat-label>Filter Results</mat-label>
-                    <input matInput 
+                    <input matInput
                            #filterInput
                            placeholder="Enter filter term and press Enter or click search"
-                           (keyup.enter)="triggerFilter(tab, filterInput.value)">
+                           (keyup.enter)="triggerFilter(tab, filterInput.value)"
+                           (input)="!filterInput.value && clearFilter(tab)">
                     <button mat-icon-button 
                             matSuffix 
                             (click)="triggerFilter(tab, filterInput.value)"
