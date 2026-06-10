@@ -82,7 +82,7 @@ class Config:
     max_content_length: int = int(os.getenv('MAX_CONTENT_LENGTH', str(1024 * 1024 * 1024)))  # 1GB default
     
     # Virtuoso authentication
-    virtuoso_user: str = os.getenv('VIRTUOSO_USER', 'dba')
+    virtuoso_user: str = os.getenv('DBA_USERNAME', 'dba')
     virtuoso_password: str = os.getenv('DBA_PASSWORD', 'dba')
 
     # Upload job storage
