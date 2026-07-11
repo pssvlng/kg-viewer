@@ -28,7 +28,7 @@ describe('ServerSideDataSource', () => {
   });
 
   it('should emit loading=true when loadData is called', (done) => {
-    dataSource.loading$.pipe(skip(1), take(1)).subscribe(v => {
+    dataSource.loading$.pipe(skip(2), take(1)).subscribe(v => {
       expect(v).toBe(true);
       done();
     });
@@ -75,8 +75,9 @@ describe('ServerSideDataSource', () => {
     const states: boolean[] = [];
     dataSource.loading$.subscribe(v => states.push(v));
     dataSource.loadData('my-graph', 'http://ex.org/Class');
+    const request = httpMock.expectOne(() => true);
     dataSource.cancelCurrentRequest();
     expect(states[states.length - 1]).toBe(false);
-    httpMock.expectOne(() => true).flush({ success: true, data: [], number: 0, totalElements: 0, size: 25, totalPages: 0 });
+    expect(request.cancelled).toBeTrue();
   });
 });

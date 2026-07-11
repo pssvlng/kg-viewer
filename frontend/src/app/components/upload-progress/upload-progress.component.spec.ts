@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { of } from 'rxjs';
 
@@ -40,36 +40,40 @@ describe('UploadProgressComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should start polling on init when jobId provided', fakeAsync(() => {
+  it('should start polling on init when jobId provided', (done) => {
     fixture.detectChanges();
-    tick(2001);
-    expect(documentServiceSpy.getUploadStatus).toHaveBeenCalledWith('job-1');
-    component.stopPolling();
-    tick();
-  }));
+    setTimeout(() => {
+      expect(documentServiceSpy.getUploadStatus).toHaveBeenCalledWith('job-1');
+      component.stopPolling();
+      done();
+    }, 2100);
+  });
 
-  it('should not start polling without jobId', fakeAsync(() => {
+  it('should not start polling without jobId', (done) => {
     component.jobId = '';
     fixture.detectChanges();
-    tick(2001);
-    expect(documentServiceSpy.getUploadStatus).not.toHaveBeenCalled();
-    tick();
-  }));
+    setTimeout(() => {
+      expect(documentServiceSpy.getUploadStatus).not.toHaveBeenCalled();
+      done();
+    }, 2100);
+  });
 
-  it('should set job from polling response', fakeAsync(() => {
+  it('should set job from polling response', (done) => {
     fixture.detectChanges();
-    tick(2001);
-    expect(component.job).toBeTruthy();
-    expect(component.job?.job_id).toBe('job-1');
-    component.stopPolling();
-    tick();
-  }));
+    setTimeout(() => {
+      expect(component.job).toBeTruthy();
+      expect(component.job?.job_id).toBe('job-1');
+      component.stopPolling();
+      done();
+    }, 2100);
+  });
 
-  it('should stop polling when job fails', fakeAsync(() => {
+  it('should stop polling when job fails', (done) => {
     documentServiceSpy.getUploadStatus.and.returnValue(of(mockJob('failed')));
     fixture.detectChanges();
-    tick(2001);
-    expect(component.job?.status).toBe('failed');
-    tick();
-  }));
+    setTimeout(() => {
+      expect(component.job?.status).toBe('failed');
+      done();
+    }, 2100);
+  });
 });

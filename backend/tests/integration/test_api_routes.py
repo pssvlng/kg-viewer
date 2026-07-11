@@ -141,3 +141,43 @@ class TestSearchEndpoint:
         assert response.status_code == 200
         body = response.get_json()
         assert "results" in body
+
+
+class TestEntityGraphEndpoint:
+    def test_entity_graph_supports_show_all(self, client, mock_sparql_repo):
+        mock_sparql_repo.query.return_value = []
+
+        response = client.get(
+            "/api/graphs/http%3A%2F%2Fex.org%2Fg/entities/http%3A%2F%2Fex.org%2Fe/graph?maxNodes=all"
+        )
+
+        assert response.status_code == 200
+        first_query = mock_sparql_repo.query.call_args_list[0].args[0]
+        assert "LIMIT" not in first_query
+
+    def test_entity_graph_accepts_custom_max_nodes(self, client, mock_sparql_repo):
+        mock_sparql_repo.query.return_value = []
+
+        response = client.get(
+            "/api/graphs/http%3A%2F%2Fex.org%2Fg/entities/http%3A%2F%2Fex.org%2Fe/graph?maxNodes=100"
+        )
+
+        assert response.status_code == 200
+        first_query = mock_sparql_repo.query.call_args_list[0].args[0]
+        assert "LIMIT 100" in first_query
+
+    def test_entity_graph_rejects_invalid_max_nodes(self, client, mock_sparql_repo):
+        response = client.get(
+            "/api/graphs/http%3A%2F%2Fex.org%2Fg/entities/http%3A%2F%2Fex.org%2Fe/graph?maxNodes=0"
+        )
+
+        assert response.status_code == 400
+        assert mock_sparql_repo.query.call_count == 0
+
+    def test_entity_graph_rejects_non_numeric_max_nodes(self, client, mock_sparql_repo):
+        response = client.get(
+            "/api/graphs/http%3A%2F%2Fex.org%2Fg/entities/http%3A%2F%2Fex.org%2Fe/graph?maxNodes=abc"
+        )
+
+        assert response.status_code == 400
+        assert mock_sparql_repo.query.call_count == 0

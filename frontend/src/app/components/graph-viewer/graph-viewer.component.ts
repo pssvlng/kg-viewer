@@ -3,9 +3,11 @@ import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, E
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatListModule } from '@angular/material/list';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -23,9 +25,11 @@ declare var cytoscape: any;
     FormsModule,
     MatButtonModule,
     MatCheckboxModule,
+    MatFormFieldModule,
     MatIconModule,
     MatListModule,
     MatProgressSpinnerModule,
+    MatSelectModule,
     MatTooltipModule
   ],
   template: `
@@ -65,6 +69,14 @@ declare var cytoscape: any;
             In place expansion
           </mat-checkbox>
           <div class="panel-toggle-row">
+            <mat-form-field class="max-edges-field" appearance="outline" subscriptSizing="dynamic">
+              <mat-label>Max edges</mat-label>
+              <mat-select [(ngModel)]="maxEdgesSelection" (selectionChange)="onMaxEdgesChange()">
+                <mat-option [value]="50">50</mat-option>
+                <mat-option [value]="100">100</mat-option>
+                <mat-option value="all">Show all</mat-option>
+              </mat-select>
+            </mat-form-field>
             <button
               mat-button
               class="panel-toggle-button"
@@ -262,8 +274,30 @@ declare var cytoscape: any;
     .panel-toggle-row {
       width: 100%;
       display: flex;
+      align-items: center;
       justify-content: flex-end;
+      gap: 8px;
       margin-top: 2px;
+    }
+
+    .max-edges-field {
+      width: 150px;
+      margin: 0;
+    }
+
+    .max-edges-field ::ng-deep .mat-mdc-form-field-subscript-wrapper {
+      display: none;
+    }
+
+    .max-edges-field ::ng-deep .mat-mdc-text-field-wrapper {
+      height: 38px;
+      padding: 0 10px;
+    }
+
+    .max-edges-field ::ng-deep .mat-mdc-form-field-infix {
+      min-height: 30px;
+      padding-top: 4px;
+      padding-bottom: 4px;
     }
 
     .panel-toggle-button {
@@ -485,6 +519,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
   tooltipY = 0;
   lastSelectedNode: string | null = null; // Track last clicked node for selected state
   originalEntityUri: string = ''; // Track original entity for reset functionality
+  maxEdgesSelection: number | 'all' = 50;
 
   private readonly destroy$ = new Subject<void>();
 
@@ -697,7 +732,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
           
           // Store initial graph data as expansion data for the central node
           // Use depth=1 to ensure we only get immediate connections
-          this.graphService.getEntityGraph(this.graphName, this.entityUri, 1, 'both', this.graphUri)
+          this.graphService.getEntityGraph(this.graphName, this.entityUri, 1, 'both', this.graphUri, this.getMaxEdgesParam())
             .pipe(takeUntil(this.destroy$))
             .subscribe({
               next: (centralData) => {
@@ -724,7 +759,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
 
   loadGraph(depth: number = 1) {
     this.loading = true;
-    this.graphService.getEntityGraph(this.graphName, this.entityUri, depth, 'both', this.graphUri)
+    this.graphService.getEntityGraph(this.graphName, this.entityUri, depth, 'both', this.graphUri, this.getMaxEdgesParam())
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (data) => {
@@ -958,7 +993,7 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
     }
     
     // Load connected nodes for the clicked node (depth=1 for single level expansion)
-    this.graphService.getEntityGraph(this.graphName, nodeUri, 1, 'both', this.graphUri)
+    this.graphService.getEntityGraph(this.graphName, nodeUri, 1, 'both', this.graphUri, this.getMaxEdgesParam())
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (newGraphData) => {
@@ -1256,6 +1291,17 @@ export class GraphViewerComponent implements OnInit, AfterViewInit, OnDestroy, C
         this.loadGraph();
       }
     }
+  }
+
+  onMaxEdgesChange() {
+    this.expandedNodes.clear();
+    this.expandedNodesData.clear();
+    this.lastSelectedNode = null;
+    this.loadGraph();
+  }
+
+  private getMaxEdgesParam(): number | null {
+    return this.maxEdgesSelection === 'all' ? null : this.maxEdgesSelection;
   }
 
   filterGraphData(graphData: any, expandedNodeUri: string) {

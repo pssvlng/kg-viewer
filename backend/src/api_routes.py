@@ -767,23 +767,33 @@ def create_api_blueprint(sparql_repo: SPARQLRepositoryInterface) -> Blueprint:
         try:
             entity_uri = unquote(entity_uri)
             graph_uri = _resolve_graph_uri(graph_name)
-            max_nodes = int(request.args.get("maxNodes", 50))
+            max_nodes_param = request.args.get("maxNodes", "50")
+            if max_nodes_param and max_nodes_param.lower() == "all":
+                max_nodes_clause = ""
+            else:
+                try:
+                    max_nodes = int(max_nodes_param)
+                except (TypeError, ValueError):
+                    return jsonify({"error": "maxNodes must be a positive integer or 'all'"}), 400
+                if max_nodes < 1:
+                    return jsonify({"error": "maxNodes must be a positive integer or 'all'"}), 400
+                max_nodes_clause = f"LIMIT {max_nodes}"
             direction = request.args.get("direction", "both")
 
             if direction == "outward":
                 sparql_q = SPARQLQueries.get_query(
                     "GET_ENTITY_OUTWARD_CONNECTIONS",
-                    graph_uri=graph_uri, entity_uri=entity_uri, max_nodes=max_nodes,
+                    graph_uri=graph_uri, entity_uri=entity_uri, max_nodes_clause=max_nodes_clause,
                 )
             elif direction == "inward":
                 sparql_q = SPARQLQueries.get_query(
                     "GET_ENTITY_INWARD_CONNECTIONS",
-                    graph_uri=graph_uri, entity_uri=entity_uri, max_nodes=max_nodes,
+                    graph_uri=graph_uri, entity_uri=entity_uri, max_nodes_clause=max_nodes_clause,
                 )
             else:
                 sparql_q = SPARQLQueries.get_query(
                     "GET_ENTITY_BIDIRECTIONAL_CONNECTIONS",
-                    graph_uri=graph_uri, entity_uri=entity_uri, max_nodes=max_nodes,
+                    graph_uri=graph_uri, entity_uri=entity_uri, max_nodes_clause=max_nodes_clause,
                 )
 
             results = sparql_repo.query(sparql_q)

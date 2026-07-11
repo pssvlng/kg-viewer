@@ -73,7 +73,7 @@ class TestGetQuery:
             ("GET_CLASS_INSTANCES_PAGINATED", {"graph_uri": "http://ex.org/g", "class_uri": "http://ex.org/C", "limit": 10, "offset": 0}),
             ("COUNT_ENTITY_TYPE_SEARCH_RESULTS", {"graph_uri": "http://ex.org/g", "class_uri": "http://ex.org/C", "search_term": "x"}),
             ("SEARCH_ENTITY_TYPE_RESULTS", {"graph_uri": "http://ex.org/g", "class_uri": "http://ex.org/C", "search_term": "x", "limit": 10, "offset": 0}),
-            ("GET_ENTITY_OUTWARD_CONNECTIONS", {"graph_uri": "http://ex.org/g", "entity_uri": "http://ex.org/e", "max_nodes": 10}),
+            ("GET_ENTITY_OUTWARD_CONNECTIONS", {"graph_uri": "http://ex.org/g", "entity_uri": "http://ex.org/e", "max_nodes_clause": "LIMIT 10"}),
             ("GET_ENTITY_LITERALS", {"graph_uri": "http://ex.org/g", "entity_uri": "http://ex.org/e"}),
             ("SEARCH_LITERALS", {"graph_uri": "http://ex.org/g", "search_term": "x", "limit": 10}),
         ]

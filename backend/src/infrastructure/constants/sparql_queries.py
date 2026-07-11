@@ -152,7 +152,7 @@ class SPARQLQueries:
             OPTIONAL {{ ?predicate <http://www.w3.org/2000/01/rdf-schema#label> ?predicateLabel }}
         }}
     }}
-    LIMIT {max_nodes}
+    {max_nodes_clause}
     """
     
     GET_ENTITY_INWARD_CONNECTIONS = """
@@ -163,7 +163,7 @@ class SPARQLQueries:
             OPTIONAL {{ ?predicate <http://www.w3.org/2000/01/rdf-schema#label> ?predicateLabel }}
         }}
     }}
-    LIMIT {max_nodes}
+    {max_nodes_clause}
     """
     
     GET_ENTITY_BIDIRECTIONAL_CONNECTIONS = """
@@ -184,7 +184,7 @@ class SPARQLQueries:
             }}
         }}
     }}
-    LIMIT {max_nodes}
+    {max_nodes_clause}
     """
     
     GET_ENTITY_LABEL = """

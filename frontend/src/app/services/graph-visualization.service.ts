@@ -46,14 +46,20 @@ export class GraphVisualizationService {
     entityUri: string,
     depth: number = 1,
     direction: 'outward' | 'inward' | 'both' = 'both',
-    graphUri?: string
+    graphUri?: string,
+    maxNodes: number | null = 50
   ): Observable<GraphData> {
     const encodedGraphName = encodeURIComponent(graphName);
     const encodedEntityUri = encodeURIComponent(entityUri);
     let params = new HttpParams()
       .set('depth', depth.toString())
-      .set('maxNodes', '50')
       .set('direction', direction);
+
+    if (maxNodes === null) {
+      params = params.set('maxNodes', 'all');
+    } else {
+      params = params.set('maxNodes', maxNodes.toString());
+    }
 
     if (graphUri) {
       params = params.set('graphUri', graphUri);
