@@ -1,7 +1,6 @@
 import { ChangeDetectorRef, ElementRef } from '@angular/core';
-import { DOCUMENT } from '@angular/common';
-import { GraphViewerComponent } from './graph-viewer.component';
 import { GraphVisualizationService } from '../../services/graph-visualization.service';
+import { GraphViewerComponent } from './graph-viewer.component';
 
 describe('GraphViewerComponent', () => {
   let component: GraphViewerComponent;
